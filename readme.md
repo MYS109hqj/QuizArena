@@ -7,3 +7,5 @@
     可以自定义头像url和名称
     根据问题类型，有不同的答题窗口
     
+注：使用fastapi uvicorn + VUE3的架构
+websocket的ip地址设为本机
