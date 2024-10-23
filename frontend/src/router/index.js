@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import EnterPage from '../components/EnterPage.vue';
-import AnswerPage from '../components/AnswerPage.vue';
-import QuestionPage from '../components/QuestionPage.vue';  // 添加提问端的组件
+import EnterPage from '../views/EnterPage.vue';
+import AnswerPage from '../views/AnswerPage.vue';
+import QuestionPage from '../views/QuestionPage.vue';  // 添加提问端的组件
 
 const routes = [
   {
