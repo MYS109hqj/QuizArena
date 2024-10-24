@@ -77,16 +77,23 @@ class ConnectionManager:
                 'question_id': room.current_question_id
             })
 
+        # 暂时：广播模式、当前轮次
         await self.broadcast(room_id, {
             'type': 'mode_change',
             'currentMode': room.mode  # 广播当前模式
+        })
+
+        await manager.broadcast(room_id, {
+            'type': 'round',
+            'totalRounds': room.total_rounds,
+            'currentRound': room.current_round
         })
 
         # 广播更新后的玩家列表
         await self.broadcast(room_id, {
             'type': 'player_list',
             'players': [
-                {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score']}
+                {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives':p.content['survival']['lives']}
                 for p in room.players.values()
             ]
         })
@@ -136,7 +143,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             if message.get('type') == 'mode_change':
                 room.mode = message['mode']  # 更新房间的模式
                 await manager.broadcast(room_id, {
-                    'type': 'mode_update',
+                    'type': 'mode_change',
                     'currentMode': room.mode  # 广播更新后的模式
                 })
 
@@ -145,12 +152,36 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 score = message['score']
                 for player in room.players.values():
                     player.content['scoring']['score'] = score  # 设置所有玩家的分数
+                # 广播更新后的玩家列表
+                await manager.broadcast(room_id, {
+                    'type': 'player_list',
+                    'players': [
+                        {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives':p.content['survival']['lives']}
+                        for p in room.players.values()
+                    ]
+                })
 
             elif message.get('type') == 'initialize_lives':
                 lives = message['lives']
                 for player in room.players.values():
                     player.content['survival']['lives'] = lives  # 设置所有玩家的生命值
+                # 广播更新后的玩家列表
+                await manager.broadcast(room_id, {
+                    'type': 'player_list',
+                    'players': [
+                        {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives':p.content['survival']['lives']}
+                        for p in room.players.values()
+                    ]
+                })
 
+            elif message.get('type') == 'round_update':
+                room.current_round = message['currentRound']
+                room.total_rounds = message['totalRounds']
+                await manager.broadcast(room_id, {
+                    'type': 'round',
+                    'totalRounds': room.total_rounds,
+                    'currentRound': room.current_round
+                })
 
             # 提问逻辑
             elif message.get('type') == 'question':
@@ -197,7 +228,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                         # 计分模式下，更新玩家的得分
                         score = result.get('score', 0)  # 从前端获取得分，默认为0
                         player.content['scoring']['round_score'] = score  # 设置当前轮次得分
-                        player.content['scoring']['total_score'] += score  # 累积总得分
+                        player.content['scoring']['score'] += score  # 累积总得分
 
                     elif room.mode == "survival":
                         # 生存模式下，更新玩家的生命状态
@@ -208,17 +239,26 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     # 可选的判题正确与否（如果需要跟踪正误）
                     player.content['judgement_correct'] = result.get('correct', False)
 
-                # 判题后是否需要执行一些额外的逻辑，例如重置当前轮次得分
-                if room.mode == "scoring":
-                    for player in room.players.values():
-                        player.content['scoring']['round_score'] = 0  # 判题后，重置当前轮次得分
-
                 room.judgement_pending = False  # 判题完成，关闭判题状态
                 # 向所有玩家广播判题结果
                 await manager.broadcast(room_id, {
                     'type': 'judgement_complete',
                     'results': judgement_results
                 })
+
+                # 广播更新后的玩家列表
+                await manager.broadcast(room_id, {
+                    'type': 'player_list',
+                    'players': [
+                        {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives':p.content['survival']['lives']}
+                        for p in room.players.values()
+                    ]
+                })
+                
+                # 判题后是否需要执行一些额外的逻辑，例如重置当前轮次得分
+                if room.mode == "scoring":
+                    for player in room.players.values():
+                        player.content['scoring']['round_score'] = 0  # 判题后，重置当前轮次得分
 
 
 
@@ -234,7 +274,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             await manager.broadcast(room_id, {
                 'type': 'player_list',
                 'players': [
-                    {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score']}
+                    {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives':p.content['survival']['lives']}
                     for p in room.players.values()
                 ]
             })

@@ -9,7 +9,7 @@
       </div>
   
       <!-- 在线玩家展示 -->
-      <div v-if="onlinePlayers.length >= 0" class="online-players">
+      <div v-if="onlinePlayers.length > 0" class="online-players">
         <h2>在线玩家:</h2>
         <ul>
           <li v-for="(player, index) in onlinePlayers" :key="index">
@@ -47,42 +47,57 @@
       <div class="round-controls">
         <label for="total-rounds">设置总轮次:</label>
         <input type="number" v-model="totalRounds" id="total-rounds">
-        <button @click="updateTotalRounds">更新总轮次</button>
+        <!-- <button @click="updateTotalRounds">更新总轮次</button> -->
   
         <label for="current-round">设置当前轮次:</label>
         <input type="number" v-model="currentRound" id="current-round">
-        <button @click="updateCurrentRound">更新当前轮次</button>
+        <button @click="updateCurrentRound">更新轮次信息</button>
       </div>
   
       <!-- 显示模式并初始化分数或生命 -->
       <div v-if="currentMode === 'scoring'">
-        <span> - 分数: {{ player.score }}</span>
         <label for="init-scores">初始化分数:</label>
         <input type="number" v-model="initScores">
         <button @click="initializeScores">初始化分数</button>
       </div>
   
       <div v-else-if="currentMode === 'survival'">
-        <span> - 生命: {{ player.lives }}</span>
         <label for="init-lives">初始化生命:</label>
         <input type="number" v-model="initLives">
         <button @click="initializeLives">初始化生命</button>
       </div>
   
+      <!-- 玩家提交的答案区域 -->
       <div class="player-answers">
         <h2>玩家提交的答案</h2>
         <ul>
           <li v-for="(answer, index) in playerAnswers" :key="index">
             <p><strong>{{ answer.name }}</strong> 提交了: {{ answer.text }}</p>
-            <input v-model="judgementResults[answer.playerId].score" placeholder="分数">
+            <!-- 评分模式 -->
+            <template v-if="judgementResults[answer.playerId]">
+              <span v-if="currentMode === 'scoring'">输入该玩家得分：</span>
+              <input
+                v-if="currentMode === 'scoring'"
+                type="number"
+                v-model="judgementResults[answer.playerId].score"
+                placeholder="输入得分" />
+
+              <!-- 生存模式 -->
+              <span v-if="currentMode === 'survival'">输入该玩家丢失生命：</span>
+              <input
+                v-else-if="currentMode === 'survival'"
+                type="number"
+                v-model="judgementResults[answer.playerId].lostLives"
+                placeholder="输入丢失生命" />
+            </template>
+
             <button @click="judgeAnswer(answer.playerId, true)">正确</button>
             <button @click="judgeAnswer(answer.playerId, false)">错误</button>
           </li>
         </ul>
         <button @click="submitJudgement">提交判题结果</button>
       </div>
-  
-  
+
       <!-- 题目类型选择 -->
       <div class="form-group">
         <label for="question-type">选择题目类型:</label>
@@ -143,21 +158,6 @@
         </ul>
       </div>
   
-      <!-- 玩家提交的答案区域，添加分值输入框 -->
-      <div class="player-answers">
-        <h2>玩家提交的答案</h2>
-        <ul>
-          <li v-for="(answer, index) in playerAnswers" :key="index">
-            <p><strong>{{ answer.name }}</strong> 提交了: {{ answer.text }}</p>
-            <input v-if="currentMode == 'scoring'" type="number" v-model="judgementResults[answer.playerId].score" placeholder="输入得分" />
-            <input v-else-if="currentMode == 'survival'" type="number" v-model="judgementResults[answer.playerId].lostLives" placeholder="输入丢失生命" />
-            <button @click="judgeAnswer(answer.playerId, true)">正确</button>
-            <button @click="judgeAnswer(answer.playerId, false)">错误</button>
-          </li>
-        </ul>
-        <button @click="submitJudgement">提交判题结果</button>
-      </div>
-  
     </div>
   </template>
   
@@ -184,8 +184,8 @@
       const avatarDefault = "https://i0.hippopx.com/photos/490/240/938/connect-connection-cooperation-hands-thumb.jpg".trim();
       const playerAnswers = ref([]);
       const judgementResults = ref({});
-      const totalRounds = ref('');
-      const currentRound = ref('');
+      const totalRounds = ref(0);
+      const currentRound = ref(0);
       const initScores = ref(0);
       const initLives = ref(3);
   
@@ -235,8 +235,12 @@
           } else if (data.type === 'player_list') {
             onlinePlayers.value = data.players; // 更新在线玩家列表，含分数和生命信息
           } else if (data.type === 'mode_change') {
-            if (currentMode.value == None && data.currentMode != None)
+            if (currentMode.value == 'none' && data.currentMode != 'none')
             currentMode.value = data.currentMode; // 更新在线玩家列表，含分数和生命信息
+          } else if (data.type === 'round') {
+            // 更新当前轮次和总轮次
+            currentRound.value = data.currentRound;
+            totalRounds.value = data.totalRounds;
           }
         };
   
@@ -264,26 +268,19 @@
         };
         socket.value.send(JSON.stringify(questionData));
       };
-  
-      // 提问者判定答案正确与否，以及模式相关的内容
+      
       const judgeAnswer = (playerId, isCorrect) => {
         if (!judgementResults.value[playerId]) {
-          // 初始化每个玩家的结果对象
           judgementResults.value[playerId] = { correct: isCorrect, score: 0, lostLives: 0 }; 
         }
-        // 设置判题正确与否
         judgementResults.value[playerId].correct = isCorrect;
-        
-        // 根据当前模式设置得分或丢失的生命数
-        if (currentMode.value === 'scoring') {
-          // 如果是计分模式，默认初始化分数为 0
-          judgementResults.value[playerId].score = judgementResults.value[playerId].score || 0;
-        } else if (currentMode.value === 'survival') {
-          // 如果是生存模式，默认初始化丢失的生命为 0
-          judgementResults.value[playerId].lostLives = judgementResults.value[playerId].lostLives || 0;
+      };
+
+      const initializeJudgement = (playerId) => {
+        if (!judgementResults.value[playerId]) {
+          judgementResults.value[playerId] = { score: 0, lostLives: 0, correct: false }; // 初始化对象
         }
       };
-  
   
       // 提交判题结果
       const submitJudgement = () => {
@@ -292,6 +289,7 @@
           results: judgementResults.value,
           currentRound: currentRound.value,  // 发送当前轮次信息
         };
+        console.log(judgementResults.value);
         socket.value.send(JSON.stringify(judgementData));
   
         // 清空答案和判题结果
@@ -312,21 +310,23 @@
       };
   
       // 设置更新轮次
-      const updateTotalRounds = () => {
-        if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-          const roundData = {
-            type: 'update_rounds',
-            totalRounds: totalRounds.value,
-          };
-          socket.value.send(JSON.stringify(roundData));
-        }
-      };
+      // const updateTotalRounds = () => {
+      //   if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      //     const roundData = {
+      //       type: 'update_rounds',
+      //       totalRounds: totalRounds.value,
+      //     };
+      //     socket.value.send(JSON.stringify(roundData));
+      //   }
+      // };
   
       const updateCurrentRound = () => {
+        console.log(currentRound.value,totalRounds.value)
         if (socket.value && socket.value.readyState === WebSocket.OPEN) {
           const roundData = {
-            type: 'update_rounds',
+            type: 'round_update',
             currentRound: currentRound.value,
+            totalRounds: totalRounds.value,
           };
           socket.value.send(JSON.stringify(roundData));
         }
@@ -403,11 +403,18 @@
         playerAnswers,
         judgeAnswer,
         submitJudgement,
+        initializeJudgement,
+        judgementResults,
         updateMode,
-        updateTotalRounds,
+        totalRounds,
+        currentRound,
+        // updateTotalRounds,
         updateCurrentRound,
+        initScores,
+        initLives,
         initializeScores,
         initializeLives,
+        // getJudgementScore,
       };
     }
   };

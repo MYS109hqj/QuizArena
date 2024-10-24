@@ -69,6 +69,9 @@
 
       <!-- 右侧玩家列表 -->
       <div class="sidebar">
+        <div class="round-info">
+          <p>当前轮次: {{ currentRound }} / {{ totalRounds }}</p>
+        </div>
         <h2>玩家列表</h2>
         <p>提问者：<span :class="{'online': questionerConnected, 'offline': !questionerConnected}">
           {{ questionerConnected ? '在线' : '离线' }}
@@ -112,6 +115,8 @@ export default {
     const currentMode = ref('none');  // 当前模式
     const playerScore = ref(0);  // 玩家得分
     const playerLives = ref(3);  // 玩家生命值（生存模式）
+    const currentRound = ref(1);  // 初始化当前轮次
+    const totalRounds = ref(1);   // 初始化总轮次
     const awaitingJudgement = ref(false);  // 等待判题状态
 
     // 生成唯一用户 ID 的函数
@@ -138,8 +143,12 @@ export default {
         questionerConnected.value = data.questionerConnected;  // 更新提问者连接状态
       } else if (data.type === 'judgement_complete') {
         awaitingJudgement.value = false;  // 判题完成
-      } else if (data.type === 'mode_update') {
+      } else if (data.type === 'mode_change') {
         currentMode.value = data.currentMode;  // 更新当前模式
+      } else if (data.type === 'round') {
+        // 更新当前轮次和总轮次
+        currentRound.value = data.currentRound;
+        totalRounds.value = data.totalRounds;
       }
     };
 
@@ -214,6 +223,8 @@ export default {
       currentMode,
       playerScore,
       playerLives,
+      currentRound,
+      totalRounds,
       awaitingJudgement,
     };
   }
