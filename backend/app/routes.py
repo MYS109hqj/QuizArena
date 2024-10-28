@@ -1,6 +1,9 @@
+import asyncio
 import json
+import time
 from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 router = APIRouter()
 
@@ -23,6 +26,7 @@ class Player:
         }
         self.submitted_answer: Optional[str] = None  # 玩家提交的答案
         self.timestamp: Optional[float] = None  # 提交时间戳
+        self.last_active_timestamp: float = time.time()
 
 # 房间类定义
 class Room:
@@ -31,11 +35,26 @@ class Room:
         self.players: Dict[str, Player] = {}
         self.current_question: Optional[Dict] = None  # 当前问题
         self.current_question_id: Optional[str] = None  # 当前问题 ID
-        self.total_rounds: Optional[int] = None  # 总轮次（计分模式特有字段）
-        self.current_round: Optional[int] = None  # 当前轮次
+        self.total_rounds: Optional[int] = 0  # 总轮次（计分模式特有字段）
+        self.current_round: Optional[int] = 0  # 当前轮次
         self.current_answers: Dict[str, str] = {}  # 收集的答案，以玩家 ID 为键
         self.judgement_pending: bool = False  # 判题标志
         self.mode: str = 'none'  # 添加当前模式属性，默认无模式
+        self.reconnect_timeout = 5  # 设置重连时间为 1 分钟
+
+    # 删除超时未重连的玩家
+    async def remove_player_if_expired(self, player_id: str):
+        player = self.players.get(player_id)
+        if player:
+            # print("功能：删除超时未重连的玩家")
+            await asyncio.sleep(self.reconnect_timeout)  # 非阻塞的延迟
+            current_time = time.time()
+            # print("功能：删除超时未重连的玩家，2")
+            # 判断是否超过重连时间
+            # print(current_time,player.last_active_timestamp,self.reconnect_timeout)
+            if current_time - player.last_active_timestamp >= self.reconnect_timeout:
+                del self.players[player_id]  # 超时，移除玩家数据
+                print(f"玩家 {player_id} 超时未重连，已删除数据")
 
 # 管理所有房间的连接
 class ConnectionManager:
@@ -48,20 +67,20 @@ class ConnectionManager:
             self.rooms[room_id] = Room()
 
         room = self.rooms[room_id]
-        
-        # 检查玩家是否已在房间中
-        if player_info['id'] in room.players:
-            print(f"玩家 {player_info['name']} 已在房间中，更新连接")
-            room.connections.append(websocket)  # 直接添加 websocket
-            return
+        player_id = player_info['id']
 
-        # 新玩家加入
-        room.connections.append(websocket)
-
-        # 创建并添加玩家信息
-        player = Player(player_info['id'], player_info['name'], player_info['avatar'])
-        room.players[player_info['id']] = player  
-        print(f"用户加入: {player_info}")
+        # 检查玩家是否在1分钟内重连
+        if player_id in room.players:
+            player = room.players[player_id]
+            player.last_active_timestamp = time.time()  # 更新活动时间
+            print(f"玩家 {player.name} 在1分钟内重连，恢复连接")
+            room.connections.append(websocket)
+        else:
+            # 新玩家加入
+            player = Player(player_id, player_info['name'], player_info['avatar'])
+            room.players[player_id] = player
+            room.connections.append(websocket)
+            print(f"新玩家加入: {player_info}")
 
         # 广播玩家加入
         await self.broadcast(room_id, {
@@ -99,14 +118,26 @@ class ConnectionManager:
         })
 
     # 断开连接时的处理
-    def disconnect(self, room_id: str, websocket: WebSocket, user_id: str):
+    async def disconnect(self, room_id: str, websocket: WebSocket, user_id: str):
+        print(room_id, websocket, user_id)
         if room_id in self.rooms:
             room = self.rooms[room_id]
             if websocket in room.connections:
+                # print('\n'*2)
+                # print("In disconnect: first connections output:")
+                # print(room.connections)
+                print(f"删除了webosocket{websocket}")
                 room.connections.remove(websocket)
+                # print("In disconnect: second connections output:")
+                # print(room.connections)
+                # print("Finish!")
             if user_id in room.players:
-                del room.players[user_id]
-                print(f"玩家 {user_id} 已离开，删除其信息")
+                # 更新为当前时间以记录断开
+                room.players[user_id].last_active_timestamp = time.time()
+                print(f"玩家 {user_id} 断开连接，等待重连")
+                # 检查该玩家是否超时未重连
+                await room.remove_player_if_expired(user_id)
+
             if not room.connections:
                 del self.rooms[room_id]
                 print(f"房间 {room_id} 已空，删除房间")
@@ -117,8 +148,21 @@ class ConnectionManager:
         if room_id in self.rooms:
             room = self.rooms[room_id]
             for connection in room.connections:
-                await connection.send_text(message_json)
+                try:
+                    if connection.client_state == WebSocketState.CONNECTED:  # 检查连接是否仍然开放
+                        await connection.send_text(message_json)
+                    else:
+                        print("尝试向已关闭的连接发送消息，跳过。")
+                except Exception as e:
+                    print(f"发送消息时出错: {e}")  # 记录发送时发生的任何错误
             print("广播发送了信息：", message_json)
+    # async def broadcast(self, room_id: str, message: dict):
+    #     message_json = json.dumps(message)
+    #     if room_id in self.rooms:
+    #         room = self.rooms[room_id]
+    #         for connection in room.connections:
+    #             await connection.send_text(message_json)
+    #         print("广播发送了信息：", message_json)
 
 # WebSocket 连接处理
 manager = ConnectionManager()
@@ -183,6 +227,16 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     'currentRound': room.current_round
                 })
 
+            elif message.get('type') == 'get_latest_answers':
+                latest_answers = [
+                    {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'submitted_answer': p.submitted_answer, 'timestamp': p.timestamp}
+                    for p in room.players.values()
+                ]
+                await manager.broadcast(room_id, {
+                    'type': 'latest_answers',
+                    'latest_answers': latest_answers
+                })
+
             # 提问逻辑
             elif message.get('type') == 'question':
                 room.current_question = message['content']
@@ -216,6 +270,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 # 提问者手动判题，获取结果
                 judgement_results = message.get('results', {})
 
+                # 初始化一个新的字典来存储带有名称和头像的结果
+                updated_results = {}
+
                 # 遍历每个玩家的判题结果
                 for player_id, result in judgement_results.items():
                     player = room.players.get(player_id)  # 使用 .get() 方法避免 KeyError
@@ -239,11 +296,21 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     # 可选的判题正确与否（如果需要跟踪正误）
                     player.content['judgement_correct'] = result.get('correct', False)
 
+                    # 将名称和头像添加到结果中
+                    updated_results[player_id] = {
+                        'name': player.name,  # 假设名称存储在 player.content 中
+                        'avatar': player.avatar,  # 假设头像存储在 player.content 中
+                        'correct': result.get('correct', False),
+                        'score': result.get('score', 0) if room.mode == 'scoring' else None,
+                        'lostLives': result.get('lostLives', 0) if room.mode == 'survival' else None,
+                    }
+
                 room.judgement_pending = False  # 判题完成，关闭判题状态
                 # 向所有玩家广播判题结果
                 await manager.broadcast(room_id, {
                     'type': 'judgement_complete',
-                    'results': judgement_results
+                    'results': updated_results,
+                    'round': message.get('currentRound', 0)
                 })
 
                 # 广播更新后的玩家列表
@@ -264,17 +331,5 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
     except WebSocketDisconnect:
         user_id = player_info['id']
-        manager.disconnect(room_id, websocket, user_id)
-        await manager.broadcast(room_id, {
-            'type': 'notification',
-            'message': f"{player_info['name']} has left the room."
-        })
-        if room_id in manager.rooms:
-            room = manager.rooms[room_id]
-            await manager.broadcast(room_id, {
-                'type': 'player_list',
-                'players': [
-                    {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives':p.content['survival']['lives']}
-                    for p in room.players.values()
-                ]
-            })
+        await manager.disconnect(room_id, websocket, user_id)
+        print(f"已删除{user_id}的websocket")
