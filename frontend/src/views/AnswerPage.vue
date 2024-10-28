@@ -100,7 +100,7 @@ export default {
   },
   setup() {
     const route = useRoute();
-    const socket = new WebSocket(`ws://localhost:8000/ws/${route.params.roomId}`);
+    const socket = new WebSocket(`${process.env.VUE_APP_WEBSOCKET_URL}/${route.params.roomId}`);
     const name = route.query.name || 'your name';
     const avatarUrl = route.query.avatarUrl || '';
     const userId = route.query.playerId || generateUniqueId();  // 从路由查询参数中获取 playerId 或生成新的 ID

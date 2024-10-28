@@ -182,7 +182,7 @@
           return; // 如果房间 ID 为空，则不创建连接
         }
   
-        socket.value = new WebSocket(`ws://localhost:8000/ws/${questionRoomId.value}`);
+        socket.value = new WebSocket(`${process.env.VUE_APP_WEBSOCKET_URL}/${questionRoomId.value}`);
   
         socket.value.onopen = () => {
           console.log('WebSocket connection opened');
