@@ -2,62 +2,101 @@
     <div class="container">
       <h1>出题端</h1>
   
-      <!-- 连接状态 -->
-      <ConnectionStatus :isConnected="isConnected" />
-
+      <!-- 连接状态指示 -->
+      <div :class="{'status-indicator': true, 'connected': isConnected, 'disconnected': !isConnected}">
+        <span v-if="isConnected">🟢 Connected</span>
+        <span v-else>🔴 Disconnected</span>
+      </div>
+  
       <!-- 在线玩家展示 -->
-      <OnlinePlayersQ :onlinePlayers="onlinePlayers" :currentMode="currentMode" />
-    
+      <div v-if="onlinePlayers.length > 0" class="online-players">
+        <h2>在线玩家:</h2>
+        <ul>
+          <li v-for="(player, index) in onlinePlayers" :key="index">
+            <img :src="player.avatar" alt="Avatar" class="avatar" />
+            <strong>{{ player.name }}</strong>
+            <!-- 根据模式显示得分或生命 -->
+            <template v-if="currentMode === 'scoring'">
+              <span> - 分数: {{ player.score }}</span>
+            </template>
+            <template v-else-if="currentMode === 'survival'">
+              <span> - 生命: {{ player.lives }}</span>
+            </template>
+          </li>
+        </ul>
+      </div>
+  
       <!-- 模式选择和按钮 -->
-      <ModeSelector :currentMode="currentMode" :updateModeCallback="updateMode" />
-      
-      <!-- 轮次更新 -->
-      <RoundControls
-        :totalRounds="totalRounds"
-        :currentRound="currentRound"
-        :updateCurrentRoundCallback="updateCurrentRound"
-      />
-      
-      <!-- 分数或生命初始化 -->
-      <ScoreLifeInitializer
-        :currentMode="currentMode"
-        :initializeScoresCallback="initializeScores"
-        :initializeLivesCallback="initializeLives"
-      />
+      <div class="form-group mode-update">
+        <label for="mode-selection">选择模式:</label>
+        <select id="mode-selection" v-model="currentMode">
+          <option value="none">无模式</option>
+          <option value="scoring">计分模式</option>
+          <option value="survival">生存模式</option>
+        </select>
+        <button @click="updateMode" class="update-button">更新房间模式</button>
+      </div>
+  
+      <!-- 新增：展示当前轮次和总轮次 -->
+      <div class="round-info">
+        <h3>轮次信息</h3>
+        <p>当前轮次: {{ currentRound }} / {{ totalRounds }}</p>
+      </div>
+  
+      <!-- 新增：设置总轮次和当前轮次 -->
+      <div class="round-controls">
+        <label for="total-rounds">设置总轮次:</label>
+        <input type="number" v-model="totalRounds" id="total-rounds">
+        <!-- <button @click="updateTotalRounds">更新总轮次</button> -->
+  
+        <label for="current-round">设置当前轮次:</label>
+        <input type="number" v-model="currentRound" id="current-round">
+        <button @click="updateCurrentRound">更新轮次信息</button>
+      </div>
+  
+      <!-- 显示模式并初始化分数或生命 -->
+      <div v-if="currentMode === 'scoring'">
+        <label for="init-scores">初始化分数:</label>
+        <input type="number" v-model="initScores">
+        <button @click="initializeScores">初始化分数</button>
+      </div>
+  
+      <div v-else-if="currentMode === 'survival'">
+        <label for="init-lives">初始化生命:</label>
+        <input type="number" v-model="initLives">
+        <button @click="initializeLives">初始化生命</button>
+      </div>
   
       <!-- 玩家提交的答案区域 -->
       <div class="player-answers">
         <h2>玩家提交的答案</h2>
-        <button @click="getLatestAnswers" class="primary-button">获取最新答案（会覆盖！）</button>
         <ul>
           <li v-for="(answer, index) in playerAnswers" :key="index">
             <p><strong>{{ answer.name }}</strong> 提交了: {{ answer.text }}</p>
-            <span>时间戳: {{ answer.timestamp }}</span>
-
-            <!-- 评分和判题功能 -->
-            <template v-if="judgementResults[answer.id]">
+            <!-- 评分模式 -->
+            <template v-if="judgementResults[answer.playerId]">
               <span v-if="currentMode === 'scoring'">输入该玩家得分：</span>
               <input
                 v-if="currentMode === 'scoring'"
                 type="number"
-                v-model="judgementResults[answer.id].score"
+                v-model="judgementResults[answer.playerId].score"
                 placeholder="输入得分" />
 
+              <!-- 生存模式 -->
               <span v-if="currentMode === 'survival'">输入该玩家丢失生命：</span>
               <input
-                v-if="currentMode === 'survival'"
+                v-else-if="currentMode === 'survival'"
                 type="number"
-                v-model="judgementResults[answer.id].lostLives"
+                v-model="judgementResults[answer.playerId].lostLives"
                 placeholder="输入丢失生命" />
             </template>
 
-            <button @click="judgeAnswer(answer.id, true)">正确</button>
-            <button @click="judgeAnswer(answer.id, false)">错误</button>
+            <button @click="judgeAnswer(answer.playerId, true)">正确</button>
+            <button @click="judgeAnswer(answer.playerId, false)">错误</button>
           </li>
         </ul>
         <button @click="submitJudgement">提交判题结果</button>
       </div>
-
 
       <!-- 题目类型选择 -->
       <div class="form-group">
@@ -126,23 +165,8 @@
   <script>
   import { ref, watch, onUnmounted, onMounted } from 'vue';
   import { useRoute } from 'vue-router';
-
-  import ConnectionStatus from '../components/ConnectionStatus.vue';
-  import OnlinePlayersQ from '../components/OnlinePlayersQ.vue';
-  import ModeSelector from '../components/ModeSelector.vue';
-  import RoundControls from '../components/RoundControls.vue';
-  import ScoreLifeInitializer from '../components/ScoreLifeInitializer.vue';
-  // import PlayerAnswers from '../components/PlayerAnswers.vue';
-
+  
   export default {
-    components: {
-    ConnectionStatus,
-    OnlinePlayersQ,
-    ModeSelector,
-    RoundControls,
-    ScoreLifeInitializer,
-    // PlayerAnswers,
-    },
     setup() {
       const route = useRoute();
       const questionRoomId = ref(route.params.roomId); // 从路由参数获取房间ID
@@ -164,15 +188,7 @@
       const currentRound = ref(0);
       const initScores = ref(0);
       const initLives = ref(3);
-      
-      watch(currentRound, (newValue) => {
-        console.log('Current Round changed to:', newValue);
-      });
-
-      watch(totalRounds, (newValue) => {
-        console.log('Total Rounds changed to:', newValue);
-      });
-
+  
       const createSocketConnection = () => {
         if (socket.value) {
           socket.value.close(); // 关闭已有连接
@@ -182,7 +198,7 @@
           return; // 如果房间 ID 为空，则不创建连接
         }
   
-        socket.value = new WebSocket(`${process.env.VUE_APP_WEBSOCKET_URL}/${questionRoomId.value}`);
+        socket.value = new WebSocket(`ws://localhost:8000/ws/${questionRoomId.value}`);
   
         socket.value.onopen = () => {
           console.log('WebSocket connection opened');
@@ -225,15 +241,6 @@
             // 更新当前轮次和总轮次
             currentRound.value = data.currentRound;
             totalRounds.value = data.totalRounds;
-            console.log(currentRound.value, totalRounds.value)
-          } else if (data.type === 'latest_answers'){
-            playerAnswers.value = data.latest_answers.map(answer => ({
-            id: answer.id,
-            name: answer.name,
-            avatar: answer.avatar || avatarDefault,
-            text: answer.submitted_answer,
-            timestamp: answer.timestamp,
-            }));
           }
         };
   
@@ -246,15 +253,7 @@
           isConnected.value = false;
         };
       };
-      
-      const getLatestAnswers = () => {
-        const requestData = {
-          type: 'get_latest_answers',
-          questionerId: playerId.value
-        };
-        socket.value.send(JSON.stringify(requestData));
-      }
-
+  
       const sendQuestion = () => {
         const questionData = {
           type: 'question',
@@ -299,53 +298,57 @@
       };
   
       // 更新模式的方法
-      const updateMode = (selectedMode) => {
-        currentMode.value = selectedMode;  // 更新本地的模式状态
-
+      const updateMode = () => {
         const modeData = {
           type: 'mode_change',
-          mode: selectedMode,
+          mode: currentMode.value,
         };
-
+        // socket.value.send(JSON.stringify(modeData));
         if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-          socket.value.send(JSON.stringify(modeData));  // 发送模式更新
+          socket.value.send(JSON.stringify(modeData));
         }
       };
   
-    // 子组件回调，用于更新轮次
-    const updateCurrentRound = (newCurrentRound, newTotalRounds) => {
-      currentRound.value = newCurrentRound;
-      totalRounds.value = newTotalRounds;
-
-      if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-        const roundData = {
-          type: 'round_update',
-          currentRound: currentRound.value,
-          totalRounds: totalRounds.value,
+      // 设置更新轮次
+      // const updateTotalRounds = () => {
+      //   if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      //     const roundData = {
+      //       type: 'update_rounds',
+      //       totalRounds: totalRounds.value,
+      //     };
+      //     socket.value.send(JSON.stringify(roundData));
+      //   }
+      // };
+  
+      const updateCurrentRound = () => {
+        console.log(currentRound.value,totalRounds.value)
+        if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+          const roundData = {
+            type: 'round_update',
+            currentRound: currentRound.value,
+            totalRounds: totalRounds.value,
+          };
+          socket.value.send(JSON.stringify(roundData));
+        }
+      };
+  
+      const initializeScores = () => {
+        // 发送初始化分数的消息
+        const initData = {
+          type: 'initialize_scores',
+          score: initScores.value, // 从输入框获取的分数
         };
-        socket.value.send(JSON.stringify(roundData));
-      }
-    };
-
-    // 子组件回调，用于初始化分数
-    const initializeScores = (score) => {
-      initScores.value = score;
-      const initData = {
-        type: 'initialize_scores',
-        score: initScores.value,
+        socket.value.send(JSON.stringify(initData)); // 发送初始化分数的请求
       };
-      socket.value.send(JSON.stringify(initData)); 
-    };
-
-    // 子组件回调，用于初始化生命
-    const initializeLives = (lives) => {
-      initLives.value = lives;
-      const initData = {
-        type: 'initialize_lives',
-        lives: initLives.value,
+  
+      const initializeLives = () => {
+        // 发送初始化生命的消息
+        const initData = {
+          type: 'initialize_lives',
+          lives: initLives.value, // 从输入框获取的生命值
+        };
+        socket.value.send(JSON.stringify(initData)); // 发送初始化生命的请求
       };
-      socket.value.send(JSON.stringify(initData));
-    };
   
       const generateUniqueId = (prefix) => {
         return `${prefix}-${Math.random().toString(36).substr(2, 9)}`;
@@ -412,111 +415,156 @@
         initializeScores,
         initializeLives,
         // getJudgementScore,
-        getLatestAnswers,
       };
     }
   };
   </script>
   
+  
   <style scoped>
   .container {
-      width: 80%;
-      margin: 0 auto;
-      font-family: Arial, sans-serif;
-      background-color: #f9f9f9;
-      padding: 20px;
-      border-radius: 10px;
-      box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+    width: 80%;
+    margin: 0 auto;
+    font-family: Arial, sans-serif;
+    background-color: #f9f9f9;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
   }
   
   h1 {
-      text-align: center;
-      color: #333;
-      margin-bottom: 20px;
+    text-align: center;
+    color: #333;
+    margin-bottom: 20px;
+  }
+  
+  .status-indicator {
+    text-align: center;
+    font-size: 1.2em;
+    margin-bottom: 20px;
+  }
+  
+  .connected {
+    color: green;
+  }
+  
+  .disconnected {
+    color: grey;
+  }
+  
+  .online-players {
+    margin-bottom: 20px;
+  }
+  
+  .online-players ul {
+    list-style-type: none;
+    padding: 0;
+  }
+  
+  .online-players li {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+  }
+  
+  .online-players .avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    margin-right: 10px;
   }
   
   .form-group {
-      margin-bottom: 20px;
+    margin-bottom: 20px;
   }
   
   label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: bold;
-      color: #555;
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #555;
   }
   
   input, select {
-      width: 100%;
-      padding: 10px;
-      margin-top: 5px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-      box-sizing: border-box;
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-sizing: border-box;
   }
   
   input::placeholder {
-      color: #999;
+    color: #999;
+  }
+  
+  .mode-update {
+    display: flex;
+    align-items: center; /* 垂直居中对齐 */
+  }
+  
+  .update-button {
+    margin-left: 10px; /* 按钮与选择框之间的间距 */
   }
   
   .button-group {
-      margin-top: 20px;
+    margin-top: 20px;
   }
   
   .primary-button, .secondary-button {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 5px;
-      font-size: 1em;
-      cursor: pointer;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    font-size: 1em;
+    cursor: pointer;
   }
   
   .primary-button {
-      background-color: #4CAF50;
-      color: white;
+    background-color: #4CAF50;
+    color: white;
   }
   
   .primary-button:disabled {
-      background-color: #ccc;
+    background-color: #ccc;
   }
   
   .secondary-button {
-      background-color: #f0f0f0;
-      color: #333;
+    background-color: #f0f0f0;
+    color: #333;
   }
   
   .secondary-button:hover {
-      background-color: #ddd;
+    background-color: #ddd;
   }
   
   .answers-section {
-      margin-top: 30px;
+    margin-top: 30px;
   }
   
   .answers-section ul {
-      list-style-type: none;
-      padding: 0;
+    list-style-type: none;
+    padding: 0;
   }
   
   .answer-item {
-      background-color: white;
-      margin-bottom: 15px;
-      padding: 10px;
-      border-radius: 10px;
-      box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.1);
-      display: flex;
-      align-items: center;
+    background-color: white;
+    margin-bottom: 15px;
+    padding: 10px;
+    border-radius: 10px;
+    box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
   }
   
   .answer-item p {
-      margin-left: 15px;
-      font-size: 1em;
+    margin-left: 15px;
+    font-size: 1em;
   }
   
   .avatar {
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
   }
   </style>
   
