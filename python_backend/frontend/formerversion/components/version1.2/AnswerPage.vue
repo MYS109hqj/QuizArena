@@ -1,10 +1,6 @@
 <template>
   <div class="container">
     <h1>答题端</h1>
-
-    <!-- 连接状态 -->
-    <ConnectionStatus :isConnected="isConnected" />
-
     <div class="content">
       <!-- 左侧主要内容 -->
       <div class="main-content">
@@ -69,16 +65,31 @@
             </li>
           </ul>
         </div>
-          <!-- 判题结果展示 -->
-          <JudgementResults v-if="judgementResults" :results="judgementResults" :currentMode="currentMode" :round="judgementResultsRound"/>
       </div>
 
+      <!-- 右侧玩家列表 -->
       <div class="sidebar">
-        <OnlinePlayersA 
-          :onlinePlayers="players" 
-          :currentMode="currentMode" 
-          :currentRound="currentRound" 
-          :totalRounds="totalRounds" />
+        <div class="round-info">
+          <p>当前轮次: {{ currentRound }} / {{ totalRounds }}</p>
+        </div>
+        <h2>玩家列表</h2>
+        <p>提问者：<span :class="{'online': questionerConnected, 'offline': !questionerConnected}">
+          {{ questionerConnected ? '在线' : '离线' }}
+        </span>
+        </p>
+        <ul>
+          <li v-for="(player, index) in players" :key="index">
+            <img v-if="player.avatar" :src="player.avatar" alt="Avatar" class="avatar-small" />
+            {{ player.name }}
+            <!-- 根据模式显示分数或生命 -->
+            <template v-if="currentMode === 'scoring'">
+              - 分数: {{ player.score }}
+            </template>
+            <template v-else-if="currentMode === 'survival'">
+              - 生命: {{ player.lives }}
+            </template>
+          </li>
+        </ul>
       </div>
     </div>
   </div>
@@ -88,16 +99,7 @@
 import { ref } from 'vue';
 import { useRoute } from 'vue-router';
 
-import ConnectionStatus from '../components/ConnectionStatus.vue';
-import OnlinePlayersA from '../components/OnlinePlayersA.vue';
-import JudgementResults from '../components/JudgementResults.vue';
-
 export default {
-  components: {
-    ConnectionStatus,
-    OnlinePlayersA,
-    JudgementResults,
-  },
   setup() {
     const route = useRoute();
     const socket = new WebSocket(`ws://localhost:8000/ws/${route.params.roomId}`);
@@ -109,7 +111,6 @@ export default {
     const answers = ref([]);
     const selectedOption = ref(null);
     const players = ref([]);
-    const isConnected = ref(false);
     const questionerConnected = ref(false);  // 提问者连接状态
     const currentMode = ref('none');  // 当前模式
     const playerScore = ref(0);  // 玩家得分
@@ -117,8 +118,6 @@ export default {
     const currentRound = ref(1);  // 初始化当前轮次
     const totalRounds = ref(1);   // 初始化总轮次
     const awaitingJudgement = ref(false);  // 等待判题状态
-    const judgementResults = ref(null);  // 判题结果
-    const judgementResultsRound = ref(0);
 
     // 生成唯一用户 ID 的函数
     function generateUniqueId() {
@@ -144,8 +143,6 @@ export default {
         questionerConnected.value = data.questionerConnected;  // 更新提问者连接状态
       } else if (data.type === 'judgement_complete') {
         awaitingJudgement.value = false;  // 判题完成
-        judgementResults.value = data.results; // 更新判题结果
-        judgementResultsRound.value = data.round;
       } else if (data.type === 'mode_change') {
         currentMode.value = data.currentMode;  // 更新当前模式
       } else if (data.type === 'round') {
@@ -158,7 +155,7 @@ export default {
     // WebSocket 打开时发送用户信息
     socket.onopen = () => {
       console.log('连接建立:', { name, avatarUrl, roomId: route.params.roomId });
-      isConnected.value = true;
+
       const joinData = {
         id: userId,  // 使用从 URL 查询参数传入的 playerId
         type: 'join',
@@ -166,11 +163,6 @@ export default {
         avatar: avatarUrl.trim() || '',
       };
       socket.send(JSON.stringify(joinData));
-    };
-
-    socket.onclose = () => {
-          console.log('WebSocket connection closed');
-          isConnected.value = false;
     };
 
     // 提交文本答案
@@ -227,7 +219,6 @@ export default {
       clearAnswers,
       selectedOption,
       players,
-      isConnected,
       questionerConnected,
       currentMode,
       playerScore,
@@ -235,8 +226,6 @@ export default {
       currentRound,
       totalRounds,
       awaitingJudgement,
-      judgementResults,
-      judgementResultsRound,
     };
   }
 };
