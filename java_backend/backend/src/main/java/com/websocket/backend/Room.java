@@ -34,22 +34,23 @@ public class Room {
         this.scheduler = Executors.newScheduledThreadPool(1); // 创建定时任务调度器
     }
 
-    public void checkExpiredPlayers() {
-        long currentTime = System.currentTimeMillis();
-        List<String> expiredPlayers = new ArrayList<>();
+    // // 该函数的用法是，检测玩家的最近行动时间，没行动就删，与我设计的逻辑不符，所以不使用。
+    // public void checkExpiredPlayers() {
+    //     long currentTime = System.currentTimeMillis();
+    //     List<String> expiredPlayers = new ArrayList<>();
 
-        for (Map.Entry<String, Player> entry : players.entrySet()) {
-            String playerId = entry.getKey();
-            Player player = entry.getValue();
-            if (currentTime - player.getLastActiveTimestamp() >= reconnectTimeout) {
-                expiredPlayers.add(playerId);
-            }
-        }
+    //     for (Map.Entry<String, Player> entry : players.entrySet()) {
+    //         String playerId = entry.getKey();
+    //         Player player = entry.getValue();
+    //         if (currentTime - player.getLastActiveTimestamp() >= reconnectTimeout) {
+    //             expiredPlayers.add(playerId);
+    //         }
+    //     }
 
-        for (String expiredPlayerId : expiredPlayers) {
-            removeSession(null, expiredPlayerId); // 从连接和玩家列表中移除
-        }
-    }
+    //     for (String expiredPlayerId : expiredPlayers) {
+    //         removeSession(null, expiredPlayerId); // 从连接和玩家列表中移除
+    //     }
+    // }
 
     public void addPlayer(String playerId, WebSocketSession session, Map<String, Object> playerInfo) {
         Player player = new Player(playerId, (String) playerInfo.get("name"), (String) playerInfo.get("avatar"));

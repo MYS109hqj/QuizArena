@@ -1,1 +1,2 @@
-/develepment_notes/
+/development_notes/*
+!/development_notes/websocket_note.md
