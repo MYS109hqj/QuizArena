@@ -1,13 +1,14 @@
 package com.websocket.backend;
 
-import org.springframework.web.socket.WebSocketSession;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.web.socket.TextMessage;
-
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketSession;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class ConnectionManager {
     private final Map<String, Room> rooms = new HashMap<>();
@@ -15,6 +16,9 @@ public class ConnectionManager {
     public void connect(String roomId, WebSocketSession session, Map<String, Object> playerInfo) {
         Room room = rooms.computeIfAbsent(roomId, k -> new Room());
         String playerId = (String) playerInfo.get("id");
+
+        session.getAttributes().put("userId", playerId);
+        // System.out.println(session);
 
         // 检查玩家是否在最近的时间内重连
         if (room.getPlayers().containsKey(playerId)) {
@@ -46,6 +50,7 @@ public class ConnectionManager {
 
     public void disconnect(String roomId, WebSocketSession session, String userId) {
         Room room = rooms.get(roomId);
+        System.out.println(session);
         if (room != null) {
             System.out.println("玩家 " + userId + " 断开连接");
             room.removeSession(session, userId);
