@@ -1,10 +1,13 @@
 package com.websocket.backend;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.web.socket.*;
+import java.util.Map;
+
+import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-import java.util.Map;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class WebSocketHandler extends TextWebSocketHandler {
     private final ConnectionManager manager = new ConnectionManager();
@@ -14,6 +17,7 @@ public class WebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         String roomId = session.getUri().getPath().split("/")[2];
         session.getAttributes().put("roomId", roomId);  // 存储 roomId
+        // System.err.println(session);
         System.out.println("连接建立：房间 ID = " + roomId + ", 会话 ID = " + session.getId());
 
         // String initialData = (String) session.getAttributes().get("initialData");

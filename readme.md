@@ -11,20 +11,53 @@
 websocket的ip地址设为本机
 
 ## 环境部署：
-后端依赖：（使用fastapi与uvicorn）
-安装：
+### Python后端
+
+#### 依赖安装
+- 使用`fastapi`与`uvicorn`作为后端框架和ASGI服务器。
+
+```bash
 pip install fastapi uvicorn
-运行：
+```
+
+#### 运行后端
+```bash
 uvicorn main:app --reload
+```
 
+### Java后端
 
-前端Vue3
-创建Vue3项目
+调试环境为java22；本项目不提供额外java后端的调试相关说明
+#### 构建与运行
+1. 清理并构建项目：
+```bash
+mvn clean package
+```
+
+2. 运行JAR文件：
+```bash
+java -jar target/backend-0.0.1-SNAPSHOT.jar
+```
+
+### 前端Vue3
+
+#### 创建Vue3项目
+```bash
 npm init vue@latest
-安装socket.io-client
+```
+
+#### 安装依赖
+- 安装`socket.io-client`以实现与后端的WebSocket通信。
+
+```bash
 npm install socket.io-client
-运行：
+```
+
+#### 运行前端
+```bash
 npm run dev
+```
+
 
 
 ## 更新日志：
