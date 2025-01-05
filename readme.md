@@ -1,3 +1,5 @@
+readme文件结构：实现功能概述-更新日志-本机、服务器部署说明
+
 ## 实现功能：
 提问端：提出问题。
     可以设定输出题目类型（目前demo只支持问答题）
@@ -9,55 +11,6 @@
     
 注：使用fastapi uvicorn + VUE3的架构
 websocket的ip地址设为本机
-
-## 环境部署：
-### Python后端
-
-#### 依赖安装
-- 使用`fastapi`与`uvicorn`作为后端框架和ASGI服务器。
-
-```bash
-pip install fastapi uvicorn
-```
-
-#### 运行后端
-```bash
-uvicorn main:app --reload
-```
-
-### Java后端
-
-调试环境为java22；本项目不提供额外java后端的调试相关说明
-#### 构建与运行
-1. 清理并构建项目：
-```bash
-mvn clean package
-```
-
-2. 运行JAR文件：
-```bash
-java -jar target/backend-0.0.1-SNAPSHOT.jar
-```
-
-### 前端Vue3
-
-#### 创建Vue3项目
-```bash
-npm init vue@latest
-```
-
-#### 安装依赖
-- 安装`socket.io-client`以实现与后端的WebSocket通信。
-
-```bash
-npm install socket.io-client
-```
-
-#### 运行前端
-```bash
-npm run dev
-```
-
 
 
 ## 更新日志：
@@ -95,3 +48,159 @@ websocket只要断开链接就删除，每次刷新页面都会重新建立新�
 完善判题逻辑
 当前版本可以记总分
 但是注意：刷新页面后用户信息会清除后再加入（已于version1.3解决该问题）
+
+
+## 本机环境部署：
+### 若使用Python后端
+
+#### 依赖安装
+- 使用`fastapi`与`uvicorn`作为后端框架和ASGI服务器。
+
+```bash
+pip install fastapi uvicorn
+```
+
+#### 运行后端
+```bash
+uvicorn main:app --reload
+```
+
+### 若使用Java后端
+
+调试环境为java22；本项目不提供额外java后端的调试相关说明
+#### 构建与运行
+1. 清理并构建项目：
+```bash
+mvn clean package
+```
+
+2. 运行JAR文件：
+```bash
+java -jar target/backend-0.0.1-SNAPSHOT.jar
+```
+
+### 前端Vue3 (使用Vite构建)
+
+#### 创建Vue3项目
+```bash
+npm init vue@latest
+```
+
+#### 安装依赖
+- 安装`socket.io-client`以实现与后端的WebSocket通信。
+
+```bash
+npm install socket.io-client
+```
+
+#### 运行前端
+```bash
+npm run dev
+```
+
+## java后端版本的服务器部署流程
+服务器环境：CentOS7 （linux系统）
+
+### 以使用windows的主机辅助为例
+（提醒：本项目的前端是基于Vite的Vue3，而非基于cli，二者有一定差别）
+
+在本机配置好node.js环境，在`/java_backend/frontend`目录中，创建`.env.production`文件，用于配置生产环境下的环境变量（本项目中用于设置服务器IP地址）。
+在`.env.production`文件中输入以下内容。（将server_ip_address替换为服务器的ip地址）
+```dotenv
+VITE_WEBSOCKET_URL=ws://server_ip_address:8080/ws
+```
+
+之后，仍然在`/java_backend/frontend`目录，进入控制台（cmd），输入
+```bash
+npm run build
+```
+完成对前端项目的构建。生成我们需要的前端静态文件，所需的文件位于`dist`文件夹中。
+
+对于后端，服务器只需要生成的jar文件。如果我有直接发送jar文件的话，可以直接使用。
+在`/java_backend/frontend`目录，进入控制台，输入
+```bash
+mvn clean package
+```
+若构建成功，JAR文件会生成在项目目录中的target文件夹中。文件名由`pox.xml`中的
+```xml
+	<artifactId>backend</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+```
+参数决定。（如上述示例下，生成jar文件的文件名是`backend-0.0.1-SNAPSHOT`）
+
+如果直接使用git clone克隆仓库，或者在linux系统操作，具体的运行命令可能会有差别，目标仍是在添加`.env.production`后生成dist中的前端静态文件以及后端的JAR文件。
+
+在生成后，将dist文件夹以及JAR文件上传到服务器。记录好dist文件夹所在的文件路径。
+
+在本示例中，使用到nginx作为反向代理。这里假设已经配置好了nginx。
+
+在CentOS中，Nginx配置文件的默认路径为`/etc/nginx/nginx.conf`，站点配置文件路径在`/etc/nginx/conf.d/`下，在此文件中直接存储站点配置文件，如创建`quiz_Arena.conf`。
+由于后端使用到了websocket，在配置文件中需要做相应配置。示例配置文件如下：（请注意修改server_name与location/{}中的root）
+```conf
+server {
+    # 监听端口 80（HTTP 默认端口）
+    listen 80; 
+    # 将 'your_server_ip_or_domain' 替换为你的服务器 IP 或域名
+    server_name your_server_ip_or_domain;
+
+    # 静态文件服务
+    location / {
+        # 将 'your_dist_path' 替换为dist文件夹的的实际部署路径
+        root your_dist_path;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # WebSocket 代理
+    location /ws {
+        proxy_pass http://localhost:8080;  # WebSocket 服务监听的后端地址
+        proxy_http_version 1.1;           # 确保使用 HTTP/1.1 以支持 Upgrade 机制
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 防止 WebSocket 超时
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # 防止静态文件和 WebSocket 路径冲突
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|otf|eot|ttc|map)$ {
+        root /var/www/quiz_Arena/vue/dist;
+        expires 1M;         # 设置浏览器缓存时间
+        access_log off;     # 关闭日志记录（减少性能开销）
+        try_files $uri =404;
+    }
+}
+```
+之后更新nginx的配置
+```SHELL
+sudo nginx -t  # 检查配置文件语法
+sudo systemctl reload nginx  # 重新加载配置
+```
+在确认nginx拥有对dist文件夹的访问权限后，前端大概率可以正常运行。
+
+对于后端，假设JAR文件的文件名为`backend-0.0.1-SNAPSHOT`。进入JAR文件所在目录，你可以输入以下指令，让后端在后台运行：
+```SHELL
+nohup java -jar backend-0.0.1-SNAPSHOT.jar > output.log 2>&1 &
+```
+后端的输出将会写入到同目录中的output.log文件。
+查看output.log，确认后端正常启动。
+
+nginx配置完毕，后端正常运行，项目在服务器上的部署也就完成了。祝你有良好的游戏体验！
+
+
+
+如果你要关闭后端进程，可以使用
+```SHELL
+ps aux | grep java
+kill <PID> # 将<PID>替换为你想要关闭的Java进程的进程ID
+```
+`ps aux | grep java`会列出所有包含"java"关键字的进程。输出中会包含进程ID（PID），将输出的PID替换掉上述命令中的`<PID>`即可正常关闭进程。
+
+如果在配置nginx的过程中遇到了错误，在CentOS7的环境下，可以输入以下指令查看日志：
+```SHELL
+tail -n 50 /var/log/nginx/error.log
+```
