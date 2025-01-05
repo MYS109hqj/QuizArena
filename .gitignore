@@ -1,2 +1,5 @@
 /development_notes/*
 !/development_notes/websocket_note.md
+
+.idea/
+.vscode/
