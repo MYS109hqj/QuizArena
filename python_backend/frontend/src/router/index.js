@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import EnterPage from '../views/EnterPage.vue';
 import AnswerPage from '../views/AnswerPage.vue';
 import QuestionPage from '../views/QuestionPage.vue';  // 添加提问端的组件
+import TestPage from '../views/testPage.vue';
 
 const routes = [
   {
@@ -26,6 +27,11 @@ const routes = [
     props: route => ({
       roomId: route.params.roomId
     })
+  },
+  {
+    path: '/test',  // 设置 URL 路径
+    name: 'TestPage',
+    component: TestPage // 绑定组件
   },
   {
     path: '/',

@@ -33,6 +33,7 @@ class Room:
     def __init__(self):
         self.connections: List[WebSocket] = []
         self.players: Dict[str, Player] = {}
+        self.connection_to_player: Dict[WebSocket, str] = {}  # 新增：连接到玩家ID的映射
         self.current_question: Optional[Dict] = None  # 当前问题
         self.current_question_id: Optional[str] = None  # 当前问题 ID
         self.total_rounds: Optional[int] = 0  # 总轮次（计分模式特有字段）
@@ -41,6 +42,7 @@ class Room:
         self.judgement_pending: bool = False  # 判题标志
         self.mode: str = 'none'  # 添加当前模式属性，默认无模式
         self.reconnect_timeout = 5  # 设置重连时间为 1 分钟
+        self.expose_answer_to_player = False
 
     # 删除超时未重连的玩家
     async def remove_player_if_expired(self, player_id: str):
@@ -82,6 +84,9 @@ class ConnectionManager:
             room.connections.append(websocket)
             print(f"新玩家加入: {player_info}")
 
+        # 绑定连接和玩家ID
+        room.connection_to_player[websocket] = player_id
+
         # 广播玩家加入
         await self.broadcast(room_id, {
             'type': 'notification',
@@ -117,6 +122,12 @@ class ConnectionManager:
             ]
         })
 
+        # 广播当前是否向其它答题者展示答案
+        await manager.broadcast(room_id, {
+            'type': 'expose_answer_update',
+            'value': room.expose_answer_to_player
+        })
+
     # 断开连接时的处理
     async def disconnect(self, room_id: str, websocket: WebSocket, user_id: str):
         print(room_id, websocket, user_id)
@@ -128,6 +139,7 @@ class ConnectionManager:
                 # print(room.connections)
                 print(f"删除了webosocket{websocket}")
                 room.connections.remove(websocket)
+                del room.connection_to_player[websocket]  # 断开时移除映射
                 # print("In disconnect: second connections output:")
                 # print(room.connections)
                 # print("Finish!")
@@ -256,14 +268,38 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     player.submitted_answer = message['text']
                     player.timestamp = message.get('timestamp')
                     room.current_answers[player_id] = player.submitted_answer
-                    # 广播玩家提交的答案
-                    await manager.broadcast(room_id, {
+                    
+                    # 构造发送给提问端的答案信息（完整可见）
+                    questioner_message = {
                         'type': 'answer',
                         'playerId': player_id,
                         'name': player.name,
                         'avatar': player.avatar,
-                        'text': player.submitted_answer
-                    })
+                        'text': player.submitted_answer  # 提问者可以看到完整答案
+                    }
+
+                    # 判断expose_answer_to_player的值，构造给其他答题玩家的答案信息
+                    if room.expose_answer_to_player:
+                        player_message = questioner_message  # 所有人都能看到答案
+                    else:
+                        # 如果是 False，答题端只看到"[Hidden]"
+                        player_message = {
+                            'type': 'answer',
+                            'playerId': player_id,
+                            'name': player.name,
+                            'avatar': player.avatar,
+                            'text': "[Hidden]"  # 其它玩家只能看到玩家提交了答案
+                        }
+
+                    # 遍历所有连接，发送对应消息
+                    for connection in room.connections:
+                        player_id_for_connection = room.connection_to_player.get(connection)
+                        if player_id_for_connection and (player_id_for_connection.startswith("questioner-") or player_id_for_connection == player_id):
+                            await connection.send_text(json.dumps(questioner_message))  # 提问者
+                        else:
+                            await connection.send_text(json.dumps(player_message))  # 答题者
+
+
 
             # 判题逻辑
             elif message.get('type') == 'judgement':
@@ -310,7 +346,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 await manager.broadcast(room_id, {
                     'type': 'judgement_complete',
                     'results': updated_results,
-                    'round': message.get('currentRound', 0)
+                    'round': message.get('currentRound', 0),
+                    'correct_answer': message.get('correct_answer', ''),
+                    'explanation': message.get('explanation', '')
                 })
 
                 # 广播更新后的玩家列表
@@ -326,7 +364,22 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 if room.mode == "scoring":
                     for player in room.players.values():
                         player.content['scoring']['round_score'] = 0  # 判题后，重置当前轮次得分
+            
+            elif message.get('type') == 'congratulations':
+                await manager.broadcast(room_id, {
+                    'type': 'congratulations_complete',
+                    'results': [
+                        {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives': p.content['survival']['lives']}
+                        for p in room.players.values()
+                    ]
+                })
 
+            elif message.get('type') == 'set_expose_answer':
+                room.expose_answer_to_player = message['expose_answer']
+                await manager.broadcast(room_id, {
+                    'type': 'expose_answer_update',
+                    'value': room.expose_answer_to_player
+                })
 
 
     except WebSocketDisconnect:

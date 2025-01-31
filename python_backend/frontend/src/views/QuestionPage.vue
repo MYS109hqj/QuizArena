@@ -11,6 +11,12 @@
       <!-- 模式选择和按钮 -->
       <ModeSelector :currentMode="currentMode" :updateModeCallback="updateMode" />
       
+      <!-- 回答答案是否对其它答题者可见 -->
+      <SetExposeAnswer 
+        :initialExposeAnswer="exposeAnswer"
+        :setExposeAnswerCallback="setExposeAnswer"
+      />
+
       <!-- 轮次更新 -->
       <RoundControls
         :totalRounds="totalRounds"
@@ -18,6 +24,8 @@
         :updateCurrentRoundCallback="updateCurrentRound"
       />
       
+      <button @click="Congratulations">显示结算界面</button>
+
       <!-- 分数或生命初始化 -->
       <ScoreLifeInitializer
         :currentMode="currentMode"
@@ -27,7 +35,7 @@
   
       <!-- 玩家提交的答案区域 -->
       <div class="player-answers">
-        <h2>玩家提交的答案</h2>
+        <h2>（判题区域）玩家提交的答案</h2>
         <button @click="getLatestAnswers" class="primary-button">获取最新答案（会覆盖！）</button>
         <ul>
           <li v-for="(answer, index) in playerAnswers" :key="index">
@@ -69,6 +77,12 @@
         </select>
       </div>
   
+      <!-- 粘贴完整题目文本 -->
+      <div class="form-group">
+        <label for="full-question">输入完整题目:</label>
+        <textarea id="full-question" v-model="fullQuestionText" placeholder="粘贴完整题目..." @blur="autoFillFields"></textarea>
+      </div>
+
       <!-- 输入题目 -->
       <div class="form-group">
         <label for="question-input">题目:</label>
@@ -94,7 +108,18 @@
         <input v-model="additionalHints[2]" placeholder="追加提示 3" />
         <input v-model="additionalHints[3]" placeholder="追加提示 4" />
       </div>
-  
+      
+      <!-- 问答题/解析输入 -->
+      <div class="form-group">
+        <label for="answer-input">答案:</label>
+        <input id="answer-input" v-model="correct_answer" placeholder="输入答案" />
+      </div>
+
+      <div class="form-group">
+        <label for="explanation-input">解析:</label>
+        <textarea id="explanation-input" v-model="explanation" placeholder="输入解析"></textarea>
+      </div>
+      
       <!-- 房间 ID 输入 -->
       <div class="form-group">
         <label for="room-id">房间 ID:</label>
@@ -118,7 +143,14 @@
           </li>
         </ul>
       </div>
-  
+
+      <!-- 结算页面展示 -->
+      <FinalResults 
+        v-if="isFinalResultsVisible" 
+        :players="finalResultsData" 
+        :currentMode="currentMode" 
+        @close="closeFinalResults" 
+      />
     </div>
   </template>
   
@@ -132,6 +164,8 @@
   import ModeSelector from '../components/ModeSelector.vue';
   import RoundControls from '../components/RoundControls.vue';
   import ScoreLifeInitializer from '../components/ScoreLifeInitializer.vue';
+  import FinalResults from '../components/FinalResults.vue';
+  import SetExposeAnswer from '../components/SetExposeAnswer.vue';
   // import PlayerAnswers from '../components/PlayerAnswers.vue';
 
   export default {
@@ -141,6 +175,8 @@
     ModeSelector,
     RoundControls,
     ScoreLifeInitializer,
+    FinalResults,
+    SetExposeAnswer,
     // PlayerAnswers,
     },
     setup() {
@@ -154,14 +190,20 @@
       const basicHint = ref('');
       const additionalHints = ref(['', '', '', '']);
       const answers = ref([]);
+      const correct_answer = ref('');
+      const explanation = ref('');
+      const fullQuestionText = ref('');
       const onlinePlayers = ref([]);
       const socket = ref(null);
       const isConnected = ref(false);
+      const exposeAnswer = ref(false);
       const avatarDefault = "https://i0.hippopx.com/photos/490/240/938/connect-connection-cooperation-hands-thumb.jpg".trim();
       const playerAnswers = ref([]);
       const judgementResults = ref({});
       const totalRounds = ref(0);
       const currentRound = ref(0);
+      const finalResultsData = ref(null);
+      const isFinalResultsVisible = ref(false);  // 控制结算窗口显示
       const initScores = ref(0);
       const initLives = ref(3);
       
@@ -171,6 +213,10 @@
 
       watch(totalRounds, (newValue) => {
         console.log('Total Rounds changed to:', newValue);
+      });
+
+      watch(exposeAnswer, (newValue) => {
+        console.log('exposeAnswer changed to:', newValue);
       });
 
       const createSocketConnection = () => {
@@ -234,6 +280,11 @@
             text: answer.submitted_answer,
             timestamp: answer.timestamp,
             }));
+          } else if (data.type === 'congratulations_complete') {
+            finalResultsData.value = data.results; // 存储结算数据
+            isFinalResultsVisible.value = true;  // 显示结算窗口
+          } else if (data.type === 'expose_answer_update') {
+            exposeAnswer.value = data.value;
           }
         };
   
@@ -247,6 +298,107 @@
         };
       };
       
+      const Congratulations = () => {
+        console.log('Button clicked');
+        
+        console.log(playerId.value);
+        const requestData = {
+          type: 'congratulations',
+          questionerId: playerId.value
+        };
+        console.log(requestData, socket.value.readyState);
+        socket.value.send(JSON.stringify(requestData));
+      };
+
+      // 自动解析用户粘贴的题目文本
+      const autoFillFields = () => {
+        const text = fullQuestionText.value.trim();
+        if (!text) return;
+
+        let lines = text.split('\n').map(line => line.trim()).filter(line => line);
+
+        // 选择题解析
+        if (questionType.value === 'mcq') {
+          question.value = lines[0];
+          options.value = lines.slice(1, 5);
+          const answerLine = lines.find(line => line.startsWith('答案：'));
+          if (!answerLine){
+            answerLine = lines.find(line => line.startsWith('答案:'));
+            correct_answer.value = answerLine.replace('答案:', '').trim();
+          } else if (answerLine) {
+            correct_answer.value = answerLine.replace('答案：', '').trim();
+          }
+          const explanationLine = lines.find(line => line.startsWith('解析：'));
+          if (!explanationLine){
+            explanationLine = lines.find(line => line.startsWith('解析:'));
+            explanation.value = explanationLine.replace('解析:', '').trim();
+          } else if (explanationLine) {
+            explanation.value = explanationLine.replace('解析：', '').trim();
+          }
+        }
+
+        // 填空题解析
+        if (questionType.value === 'fill') {
+          question.value = lines[0];
+          const answerLine = lines.find(line => line.startsWith('答案：'));
+          if (!answerLine){
+            answerLine = lines.find(line => line.startsWith('答案:'));
+            correct_answer.value = answerLine.replace('答案:', '').trim();
+          } else if (answerLine) {
+            correct_answer.value = answerLine.replace('答案：', '').trim();
+          }
+          const explanationLine = lines.find(line => line.startsWith('解析：'));
+          if (!explanationLine){
+            explanationLine = lines.find(line => line.startsWith('解析:'));
+            explanation.value = explanationLine.replace('解析:', '').trim();
+          } else if (explanationLine) {
+            explanation.value = explanationLine.replace('解析：', '').trim();
+          }
+        }
+
+        // 问答题解析
+        if (questionType.value === 'qa') {
+          question.value = lines[0];
+          const answerLine = lines.find(line => line.startsWith('答案：'));
+          if (!answerLine){
+            answerLine = lines.find(line => line.startsWith('答案:'));
+            correct_answer.value = answerLine.replace('答案:', '').trim();
+          } else if (answerLine) {
+            correct_answer.value = answerLine.replace('答案：', '').trim();
+          }
+          const explanationLine = lines.find(line => line.startsWith('解析：'));
+          if (!explanationLine){
+            explanationLine = lines.find(line => line.startsWith('解析:'));
+            explanation.value = explanationLine.replace('解析:', '').trim();
+          } else if (explanationLine) {
+            explanation.value = explanationLine.replace('解析：', '').trim();
+          }
+        }
+
+        // 多提示题解析
+        if (questionType.value === 'hints') {
+          question.value = lines[0];
+          basicHint.value = lines[1] || '';
+          additionalHints.value = lines.slice(2, 6);
+
+          // 处理正确答案和解析
+          const answerLine = lines.find(line => line.startsWith('答案：'));
+          if (!answerLine){
+            answerLine = lines.find(line => line.startsWith('答案:'));
+            correct_answer.value = answerLine.replace('答案:', '').trim();
+          } else if (answerLine) {
+            correct_answer.value = answerLine.replace('答案：', '').trim();
+          }
+          const explanationLine = lines.find(line => line.startsWith('解析：'));
+          if (!explanationLine){
+            explanationLine = lines.find(line => line.startsWith('解析:'));
+            explanation.value = explanationLine.replace('解析:', '').trim();
+          } else if (explanationLine) {
+            explanation.value = explanationLine.replace('解析：', '').trim();
+          }
+        }
+      };
+
       const getLatestAnswers = () => {
         const requestData = {
           type: 'get_latest_answers',
@@ -289,6 +441,8 @@
           type: 'judgement',
           results: judgementResults.value,
           currentRound: currentRound.value,  // 发送当前轮次信息
+          correct_answer: correct_answer.value,
+          explanation: explanation.value,
         };
         console.log(judgementResults.value);
         socket.value.send(JSON.stringify(judgementData));
@@ -356,6 +510,9 @@
         options.value = ['', '', '', ''];
         basicHint.value = '';
         additionalHints.value = ['', '', '', ''];
+        correct_answer.value = '';
+        explanation.value = '';
+        fullQuestionText.value = '';
       };
   
       const clearQuestion = () => {
@@ -365,6 +522,22 @@
       const clearAnswers = () => {
         answers.value = [];
       };
+
+      const closeFinalResults = () => {
+        isFinalResultsVisible.value = false;
+      };
+
+      const setExposeAnswer = (value) => {
+        exposeAnswer.value = value;
+        const modeData = {
+          type: 'set_expose_answer',
+          expose_answer: exposeAnswer.value,
+          room_id: questionRoomId.value
+        };
+        if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+          socket.value.send(JSON.stringify(modeData));  // 发送模式更新
+        }
+      }
   
       watch(questionRoomId, (newRoomId) => {
         if (newRoomId.trim()) {
@@ -391,9 +564,13 @@
         basicHint,
         additionalHints,
         answers,
+        correct_answer,
+        explanation,
+        fullQuestionText,
         resetFields,
         isConnected,
         onlinePlayers,
+        autoFillFields,
         sendQuestion,
         clearQuestion,
         clearAnswers,
@@ -413,6 +590,12 @@
         initializeLives,
         // getJudgementScore,
         getLatestAnswers,
+        Congratulations,
+        finalResultsData,
+        isFinalResultsVisible,
+        closeFinalResults,
+        exposeAnswer,
+        setExposeAnswer,
       };
     }
   };
@@ -479,6 +662,10 @@
   .primary-button:disabled {
       background-color: #ccc;
   }
+
+  .primary-button:hover {
+    background-color: #45a049;
+  }
   
   .secondary-button {
       background-color: #f0f0f0;
@@ -517,6 +704,21 @@
       width: 50px;
       height: 50px;
       border-radius: 50%;
+  }
+
+  .question-input-container {
+    width: 60%;
+    margin: 0 auto;
+    font-family: Arial, sans-serif;
+    background-color: #f9f9f9;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+  }
+
+  h2 {
+    text-align: center;
+    color: #333;
   }
   </style>
   
