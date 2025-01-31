@@ -70,7 +70,20 @@
           </ul>
         </div>
           <!-- 判题结果展示 -->
-          <JudgementResults v-if="judgementResults" :results="judgementResults" :currentMode="currentMode" :round="judgementResultsRound"/>
+          <JudgementResults 
+            v-if="judgementResults" 
+            :results="judgementResults" 
+            :currentMode="currentMode" 
+            :round="judgementResultsRound"
+            :correctAnswer="correct_answer"
+            :explanation="explanation"
+          />
+          <FinalResults 
+            v-if="isFinalResultsVisible" 
+            :players="finalResultsData" 
+            :currentMode="currentMode" 
+            @close="closeFinalResults" 
+          />
       </div>
 
       <div class="sidebar">
@@ -91,12 +104,14 @@ import { useRoute } from 'vue-router';
 import ConnectionStatus from '../components/ConnectionStatus.vue';
 import OnlinePlayersA from '../components/OnlinePlayersA.vue';
 import JudgementResults from '../components/JudgementResults.vue';
+import FinalResults from '@/components/FinalResults.vue';
 
 export default {
   components: {
     ConnectionStatus,
     OnlinePlayersA,
     JudgementResults,
+    FinalResults,
   },
   setup() {
     const route = useRoute();
@@ -106,6 +121,8 @@ export default {
     const userId = route.query.playerId || generateUniqueId();  // 从路由查询参数中获取 playerId 或生成新的 ID
     const receivedQuestion = ref(null);
     const answer = ref('');
+    const correct_answer = ref('');
+    const explanation = ref('');
     const answers = ref([]);
     const selectedOption = ref(null);
     const players = ref([]);
@@ -119,6 +136,8 @@ export default {
     const awaitingJudgement = ref(false);  // 等待判题状态
     const judgementResults = ref(null);  // 判题结果
     const judgementResultsRound = ref(0);
+    const finalResultsData = ref(null);
+    const isFinalResultsVisible = ref(false);  // 控制结算窗口显示
 
     // 生成唯一用户 ID 的函数
     function generateUniqueId() {
@@ -143,15 +162,20 @@ export default {
         players.value = data.players;  // 更新玩家列表
         questionerConnected.value = data.questionerConnected;  // 更新提问者连接状态
       } else if (data.type === 'judgement_complete') {
-        awaitingJudgement.value = false;  // 判题完成
-        judgementResults.value = data.results; // 更新判题结果
+        awaitingJudgement.value = false;  
+        judgementResults.value = data.results; 
         judgementResultsRound.value = data.round;
+        correct_answer.value = data.correct_answer;  // 存储正确答案
+        explanation.value = data.explanation;  // 存储解析
       } else if (data.type === 'mode_change') {
         currentMode.value = data.currentMode;  // 更新当前模式
       } else if (data.type === 'round') {
         // 更新当前轮次和总轮次
         currentRound.value = data.currentRound;
         totalRounds.value = data.totalRounds;
+      } else if (data.type === 'congratulations_complete') {
+        finalResultsData.value = data.results; // 服务器返回的最终分数或生命值数据
+        isFinalResultsVisible.value = true;  // 显示结算窗口
       }
     };
 
@@ -215,12 +239,19 @@ export default {
       answers.value = [];
     };
 
+    // 关闭结算窗口
+    const closeFinalResults = () => {
+      isFinalResultsVisible.value = false;
+    };
+
     return {
       name,
       avatarUrl,
       receivedQuestion,
       answer,
       answers,
+      correct_answer,
+      explanation,
       sendAnswer,
       submitMCQAnswer,
       selectOption,
@@ -237,6 +268,10 @@ export default {
       awaitingJudgement,
       judgementResults,
       judgementResultsRound,
+      FinalResults,
+      finalResultsData,
+      isFinalResultsVisible,
+      closeFinalResults,
     };
   }
 };

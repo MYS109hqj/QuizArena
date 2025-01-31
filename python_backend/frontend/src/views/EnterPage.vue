@@ -10,6 +10,12 @@
             {{ avatar }}
           </option>
         </select>
+        <input 
+          v-model="customAvatarUrl" 
+          @input="updateAvatarUrl" 
+          placeholder="或输入自定义头像 URL" 
+          class="input-field" 
+        />
       </div>
       <input v-model="roomId" placeholder="输入房间 ID" class="input-field" />
       <button @click="enterRoom" class="primary-button">进入房间</button>
@@ -34,6 +40,7 @@ export default {
     const selectedAvatar = ref(''); // 选中的头像
     const roomId = ref('');
     const questionRoomId = ref('');
+    const customAvatarUrl = ref(''); // 自定义头像 URL
     const router = useRouter();
 
     // 备选头像 URL 列表
@@ -45,17 +52,17 @@ export default {
     ]);
 
     // 生成唯一用户 ID 的函数
-    const generateUniqueId = () => {
-      return 'user-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
+    const generateUniqueId = (prefix) => {
+      return `${prefix}-${Math.random().toString(36).substr(2, 9)}`;
     };
 
     // 进入答题端的函数
     const enterRoom = () => {
       if (name.value.trim() && roomId.value.trim()) {
-        const playerId = generateUniqueId();  // 生成随机 playerId
+        const playerId = generateUniqueId('user');  // 生成随机 playerId
 
         // 最终头像 URL 选择逻辑
-        avatarUrl.value = selectedAvatar.value || ''; // 直接使用选中的头像
+        avatarUrl.value = customAvatarUrl.value.trim() || selectedAvatar.value || ''; // 使用自定义 URL 或选中的头像
 
         console.log('Entering room with data:', {
           roomId: roomId.value.trim(),
@@ -84,13 +91,14 @@ export default {
 
     // 更新头像 URL
     const updateAvatarUrl = () => {
-      avatarUrl.value = selectedAvatar.value; // 更新输入框中的头像 URL
+      // 先检查是否有自定义 URL，有则使用自定义 URL
+      avatarUrl.value = customAvatarUrl.value.trim() || selectedAvatar.value;
     };
 
     // 进入提问端的函数
     const enterQuestionPage = () => {
       if (questionRoomId.value.trim()) {
-        const playerId = generateUniqueId();  // 生成随机 playerId
+        const playerId = generateUniqueId('questioner');  // 生成随机 playerId
 
         // 将 playerId 作为查询参数带入 QuestionPage
         router.push({
@@ -114,6 +122,7 @@ export default {
       questionRoomId,
       avatarOptions,
       selectedAvatar,
+      customAvatarUrl, // 返回自定义头像 URL
       enterRoom,
       enterQuestionPage,
       updateAvatarUrl
@@ -121,7 +130,6 @@ export default {
   }
 };
 </script>
-
 
 <style scoped>
 .container {
@@ -160,17 +168,10 @@ h1 {
 
 .avatar-container {
   display: flex;
+  flex-direction: column;
   align-items: center;
   width: 100%;
   max-width: 400px;
-}
-
-.avatar-select {
-  margin-right: 10px; /* 可以删除，因为现在改为使用 input-field */
-  padding: 10px;
-  border-radius: 5px;
-  border: 1px solid #ccc;
-  width: 100%;
 }
 
 .primary-button {
