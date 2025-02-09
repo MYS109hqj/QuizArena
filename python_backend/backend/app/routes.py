@@ -64,117 +64,139 @@ class ConnectionManager:
         self.rooms: Dict[str, Room] = {}
 
     async def connect(self, room_id: str, websocket: WebSocket, player_info: dict):
-        # 如果房间不存在，创建房间
+        """玩家连接房间"""
         if room_id not in self.rooms:
             self.rooms[room_id] = Room()
-
         room = self.rooms[room_id]
         player_id = player_info['id']
+        # 判断玩家角色，区分提问者和答题者
+        is_questioner = player_id.startswith("questioner-")
 
-        # 检查玩家是否在1分钟内重连
         if player_id in room.players:
-            player = room.players[player_id]
-            player.last_active_timestamp = time.time()  # 更新活动时间
-            print(f"玩家 {player.name} 在1分钟内重连，恢复连接")
-            room.connections.append(websocket)
+            room.players[player_id].last_active_timestamp = time.time()
+            print(f"玩家 {player_info['name']} 在{room.reconnect_timeout}秒内重连")
         else:
-            # 新玩家加入
-            player = Player(player_id, player_info['name'], player_info['avatar'])
-            room.players[player_id] = player
-            room.connections.append(websocket)
+            room.players[player_id] = Player(player_id, player_info['name'], player_info['avatar'])
             print(f"新玩家加入: {player_info}")
 
-        # 绑定连接和玩家ID
+        room.connections.append(websocket)
         room.connection_to_player[websocket] = player_id
 
-        # 广播玩家加入
-        await self.broadcast(room_id, {
-            'type': 'notification',
-            'message': f"{player_info['name']} has joined the room."
-        })
+        await self.broadcast_player_list(room_id)  # 广播玩家列表
+        await self.broadcast_expose_answer(room_id, room.expose_answer_to_player)  # 广播是否曝光答案，放在这的原因是答题端的expose_answer只要改选项就自动广播修改
+        # 如果是提问者，广播所有人；如果是答题者，为了防止覆盖掉提问端最新改动，下面信息只广播给所有答题者
+        if is_questioner:
+            # 提问者连接时，广播给所有玩家
+            await self.broadcast_mode_change(room_id, room.mode)  # 广播模式
+            await self.broadcast_round_info(room_id, room.total_rounds, room.current_round)  # 广播轮次   
+            if room.current_question:
+                await self.broadcast_question(room_id, room.current_question, room.current_question_id)
+            # 另外广播给答题者超时时长
+            await self.broadcast_timeout_change(room_id, room.reconnect_timeout)
+        else:
+            # 答题者连接时，仅广播给答题者
+            await self.broadcast_mode_change(room_id, room.mode, roles=["player"])  # 只广播给答题者
+            await self.broadcast_round_info(room_id, room.total_rounds, room.current_round, roles=["player"])  # 只广播给答题者
+            if room.current_question:
+                await self.broadcast_question(room_id, room.current_question, room.current_question_id, roles=["player"])  # 只广播给答题者
 
-        # 广播当前问题（如果存在）
-        if room.current_question:
-            await self.broadcast(room_id, {
-                'type': 'question',
-                'content': room.current_question,
-                'question_id': room.current_question_id
-            })
-
-        # 暂时：广播模式、当前轮次
-        await self.broadcast(room_id, {
-            'type': 'mode_change',
-            'currentMode': room.mode  # 广播当前模式
-        })
-
-        await manager.broadcast(room_id, {
-            'type': 'round',
-            'totalRounds': room.total_rounds,
-            'currentRound': room.current_round
-        })
-
-        # 广播更新后的玩家列表
-        await self.broadcast(room_id, {
-            'type': 'player_list',
-            'players': [
-                {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives':p.content['survival']['lives']}
-                for p in room.players.values()
-            ]
-        })
-
-        # 广播当前是否向其它答题者展示答案
-        await manager.broadcast(room_id, {
-            'type': 'expose_answer_update',
-            'value': room.expose_answer_to_player
-        })
-
-    # 断开连接时的处理
     async def disconnect(self, room_id: str, websocket: WebSocket, user_id: str):
-        print(room_id, websocket, user_id)
+        """玩家断开连接"""
         if room_id in self.rooms:
             room = self.rooms[room_id]
             if websocket in room.connections:
-                # print('\n'*2)
-                # print("In disconnect: first connections output:")
-                # print(room.connections)
-                print(f"删除了webosocket{websocket}")
                 room.connections.remove(websocket)
-                del room.connection_to_player[websocket]  # 断开时移除映射
-                # print("In disconnect: second connections output:")
-                # print(room.connections)
-                # print("Finish!")
+                del room.connection_to_player[websocket]
+
             if user_id in room.players:
-                # 更新为当前时间以记录断开
                 room.players[user_id].last_active_timestamp = time.time()
                 print(f"玩家 {user_id} 断开连接，等待重连")
-                # 检查该玩家是否超时未重连
                 await room.remove_player_if_expired(user_id)
 
             if not room.connections:
                 del self.rooms[room_id]
                 print(f"房间 {room_id} 已空，删除房间")
 
-    # 广播消息给房间所有人
     async def broadcast(self, room_id: str, message: dict):
+        """通用的广播函数"""
+        if room_id in self.rooms:
+            room = self.rooms[room_id]
+            message_json = json.dumps(message)
+            for connection in room.connections:
+                try:
+                    if connection.client_state == WebSocketState.CONNECTED:
+                        await connection.send_text(message_json)
+                except Exception as e:
+                    print(f"发送消息失败: {e}")
+            print(f"广播发送：{message_json}")
+
+    async def broadcast_to_roles(self, room_id: str, message: dict, roles: List[str] = ["questioner", "player"]):
+        """
+        仅广播给指定角色的玩家：
+        - `roles` 可以包含 "questioner" (提问者) 和/或 "player" (答题者)。
+        """
         message_json = json.dumps(message)
         if room_id in self.rooms:
             room = self.rooms[room_id]
             for connection in room.connections:
-                try:
-                    if connection.client_state == WebSocketState.CONNECTED:  # 检查连接是否仍然开放
+                player_id = room.connection_to_player.get(connection)
+                if player_id:
+                    if "questioner" in roles and player_id.startswith("questioner-"):
                         await connection.send_text(message_json)
-                    else:
-                        print("尝试向已关闭的连接发送消息，跳过。")
-                except Exception as e:
-                    print(f"发送消息时出错: {e}")  # 记录发送时发生的任何错误
-            print("广播发送了信息：", message_json)
-    # async def broadcast(self, room_id: str, message: dict):
-    #     message_json = json.dumps(message)
-    #     if room_id in self.rooms:
-    #         room = self.rooms[room_id]
-    #         for connection in room.connections:
-    #             await connection.send_text(message_json)
-    #         print("广播发送了信息：", message_json)
+                    elif "player" in roles and player_id.startswith("user-"):  # 修正对答题者的判断
+                        await connection.send_text(message_json)
+
+    # ✅ **封装不同类型的广播**
+
+    async def broadcast_question(self, room_id: str, content: dict, question_id: str, roles: List[str] = ["questioner", "player"]):
+        await self.broadcast_to_roles(room_id, {
+            'type': 'question',
+            'content': content,
+            'questionId': question_id,
+        }, roles)
+
+    async def broadcast_mode_change(self, room_id: str, mode: str, roles: List[str] = ["questioner", "player"]):
+        await self.broadcast_to_roles(room_id, {
+            'type': 'mode_change',
+            'currentMode': mode
+        }, roles)
+
+    async def broadcast_round_info(self, room_id: str, total_rounds: int, current_round: int, roles: List[str] = ["questioner", "player"]):
+        await self.broadcast_to_roles(room_id, {
+            'type': 'round',
+            'totalRounds': total_rounds,
+            'currentRound': current_round
+        }, roles)
+
+    async def broadcast_player_list(self, room_id: str):
+        room = self.rooms[room_id]
+        await self.broadcast(room_id, {
+            'type': 'player_list',
+            'players': [
+                {'id': p.id, 'name': p.name, 'avatar': p.avatar, 
+                 'score': p.content['scoring']['score'], 'lives': p.content['survival']['lives']}
+                for p in room.players.values()
+            ]
+        })
+
+    async def broadcast_expose_answer(self, room_id: str, expose_answer: bool):
+        await self.broadcast(room_id, {
+            'type': 'expose_answer_update',
+            'value': expose_answer
+        })
+
+    async def broadcast_notification(self, room_id: str, message: str):
+        await self.broadcast(room_id, {
+            'type': 'notification',
+            'message': message
+        })
+
+    async def broadcast_timeout_change(self, room_id: str, reconnect_timeout):
+        await self.broadcast_to_roles(room_id, {
+            'type': 'timeout_change',
+            'reconnect_timeout': reconnect_timeout
+        },['questioner'])
+
 
 # WebSocket 连接处理
 manager = ConnectionManager()
@@ -197,11 +219,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
             # 处理模式变化消息
             if message.get('type') == 'mode_change':
-                room.mode = message['mode']  # 更新房间的模式
-                await manager.broadcast(room_id, {
-                    'type': 'mode_change',
-                    'currentMode': room.mode  # 广播更新后的模式
-                })
+                room.mode = message['mode']
+                await manager.broadcast_mode_change(room_id, room.mode)
+
+            elif message.get('type') == 'timeout_change':
+                room.reconnect_timeout = int(message['reconnect_timeout'])
+                print(f"Now the reconnect_timeout in {room_id} is {room.reconnect_timeout}")
 
             # 在 websocket_endpoint 中添加以下处理逻辑
             elif message.get('type') == 'initialize_scores':
@@ -233,16 +256,14 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             elif message.get('type') == 'round_update':
                 room.current_round = message['currentRound']
                 room.total_rounds = message['totalRounds']
-                await manager.broadcast(room_id, {
-                    'type': 'round',
-                    'totalRounds': room.total_rounds,
-                    'currentRound': room.current_round
-                })
+                await manager.broadcast_round_info(room_id, room.total_rounds, room.current_round)
+
 
             elif message.get('type') == 'get_latest_answers':
                 latest_answers = [
                     {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'submitted_answer': p.submitted_answer, 'timestamp': p.timestamp}
                     for p in room.players.values()
+                    if not p.id.startswith("questioner-")  # 排除提问者
                 ]
                 await manager.broadcast(room_id, {
                     'type': 'latest_answers',
@@ -253,12 +274,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             elif message.get('type') == 'question':
                 room.current_question = message['content']
                 room.current_question_id = message['questionId']
-                room.judgement_pending = True  # 设置等待判题标志
-                await manager.broadcast(room_id, {
-                    'type': 'question',
-                    'content': message['content'],
-                    'questionId': message['questionId']
-                })
+                room.judgement_pending = True
+                await manager.broadcast_question(room_id, message['content'], message['questionId'])
+
 
             # 答案逻辑
             elif message.get('type') == 'answer':
@@ -275,6 +293,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                         'playerId': player_id,
                         'name': player.name,
                         'avatar': player.avatar,
+                        'timestamp': player.timestamp,
                         'text': player.submitted_answer  # 提问者可以看到完整答案
                     }
 
@@ -288,6 +307,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                             'playerId': player_id,
                             'name': player.name,
                             'avatar': player.avatar,
+                            'timestamp': player.timestamp,
                             'text': "[Hidden]"  # 其它玩家只能看到玩家提交了答案
                         }
 
@@ -298,8 +318,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                             await connection.send_text(json.dumps(questioner_message))  # 提问者
                         else:
                             await connection.send_text(json.dumps(player_message))  # 答题者
-
-
 
             # 判题逻辑
             elif message.get('type') == 'judgement':
@@ -369,17 +387,21 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 await manager.broadcast(room_id, {
                     'type': 'congratulations_complete',
                     'results': [
-                        {'id': p.id, 'name': p.name, 'avatar': p.avatar, 'score': p.content['scoring']['score'], 'lives': p.content['survival']['lives']}
-                        for p in room.players.values()
+                        {
+                            'id': p.id,
+                            'name': p.name,
+                            'avatar': p.avatar,
+                            'score': p.content['scoring']['score'],
+                            'lives': p.content['survival']['lives']
+                        }
+                        for p in room.players.values() if not p.id.startswith("questioner-")  # 排除提问者
                     ]
                 })
 
             elif message.get('type') == 'set_expose_answer':
                 room.expose_answer_to_player = message['expose_answer']
-                await manager.broadcast(room_id, {
-                    'type': 'expose_answer_update',
-                    'value': room.expose_answer_to_player
-                })
+                await manager.broadcast_expose_answer(room_id, room.expose_answer_to_player)
+
 
 
     except WebSocketDisconnect:

@@ -23,7 +23,18 @@
         :currentRound="currentRound"
         :updateCurrentRoundCallback="updateCurrentRound"
       />
-      
+      <!-- 显示当前重连超时时间 -->
+      <div>
+        <label for="reconnectTimeout">房间当前重连超时时间 (秒): </label>
+        <input
+          id="reconnectTimeout"
+          type="number"
+          v-model="reconnectTimeout"
+          @input="handleInput" 
+          min="1"
+        />
+      </div>
+      <!-- 显示结算界面的按钮 -->
       <button @click="Congratulations">显示结算界面</button>
 
       <!-- 分数或生命初始化 -->
@@ -158,6 +169,7 @@
   <script>
   import { ref, watch, onUnmounted, onMounted } from 'vue';
   import { useRoute } from 'vue-router';
+  import { debounce } from 'lodash';
 
   import ConnectionStatus from '../components/ConnectionStatus.vue';
   import OnlinePlayersQ from '../components/OnlinePlayersQ.vue';
@@ -206,6 +218,7 @@
       const isFinalResultsVisible = ref(false);  // 控制结算窗口显示
       const initScores = ref(0);
       const initLives = ref(3);
+      const reconnectTimeout = ref(5); 
       
       watch(currentRound, (newValue) => {
         console.log('Current Round changed to:', newValue);
@@ -285,6 +298,8 @@
             isFinalResultsVisible.value = true;  // 显示结算窗口
           } else if (data.type === 'expose_answer_update') {
             exposeAnswer.value = data.value;
+          } else if (data.type === 'timeout_change') {
+            reconnectTimeout.value = data.reconnect_timeout; // 更新重连超时时间
           }
         };
   
@@ -310,6 +325,24 @@
         socket.value.send(JSON.stringify(requestData));
       };
 
+      // 发送重连超时时间的变化
+      const sendReconnectTimeoutChange = debounce(() => {
+        if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+          const timeoutData = {
+            type: 'timeout_change',
+            reconnect_timeout: reconnectTimeout.value,
+          };
+          socket.value.send(JSON.stringify(timeoutData)); // 向后端发送重连超时变化
+          console.log('Sent reconnect timeout change:', reconnectTimeout.value);
+        }
+      }, 800);  // 设置防抖时间为 800 毫秒
+
+      // 监听输入框变化的事件
+      const handleInput = (event) => {
+        reconnectTimeout.value = event.target.value;
+        sendReconnectTimeoutChange();  // 调用防抖后的函数
+      };
+
       // 自动解析用户粘贴的题目文本
       const autoFillFields = () => {
         const text = fullQuestionText.value.trim();
@@ -320,15 +353,17 @@
         // 选择题解析
         if (questionType.value === 'mcq') {
           question.value = lines[0];
-          options.value = lines.slice(1, 5);
-          const answerLine = lines.find(line => line.startsWith('答案：'));
+          options.value = lines.slice(1, 5).map(line => {
+            return line.replace(/^[A-D]\.\s*/, ''); // 仅去掉行首的 A.、B.、C.、D. 等前缀
+          });
+          let answerLine = lines.find(line => line.startsWith('答案：'));
           if (!answerLine){
             answerLine = lines.find(line => line.startsWith('答案:'));
             correct_answer.value = answerLine.replace('答案:', '').trim();
           } else if (answerLine) {
             correct_answer.value = answerLine.replace('答案：', '').trim();
           }
-          const explanationLine = lines.find(line => line.startsWith('解析：'));
+          let explanationLine = lines.find(line => line.startsWith('解析：'));
           if (!explanationLine){
             explanationLine = lines.find(line => line.startsWith('解析:'));
             explanation.value = explanationLine.replace('解析:', '').trim();
@@ -337,36 +372,36 @@
           }
         }
 
-        // 填空题解析
-        if (questionType.value === 'fill') {
-          question.value = lines[0];
-          const answerLine = lines.find(line => line.startsWith('答案：'));
-          if (!answerLine){
-            answerLine = lines.find(line => line.startsWith('答案:'));
-            correct_answer.value = answerLine.replace('答案:', '').trim();
-          } else if (answerLine) {
-            correct_answer.value = answerLine.replace('答案：', '').trim();
-          }
-          const explanationLine = lines.find(line => line.startsWith('解析：'));
-          if (!explanationLine){
-            explanationLine = lines.find(line => line.startsWith('解析:'));
-            explanation.value = explanationLine.replace('解析:', '').trim();
-          } else if (explanationLine) {
-            explanation.value = explanationLine.replace('解析：', '').trim();
-          }
-        }
+        // // 填空题解析
+        // if (questionType.value === 'fill') {
+        //   question.value = lines[0];
+        //   const answerLine = lines.find(line => line.startsWith('答案：'));
+        //   if (!answerLine){
+        //     answerLine = lines.find(line => line.startsWith('答案:'));
+        //     correct_answer.value = answerLine.replace('答案:', '').trim();
+        //   } else if (answerLine) {
+        //     correct_answer.value = answerLine.replace('答案：', '').trim();
+        //   }
+        //   const explanationLine = lines.find(line => line.startsWith('解析：'));
+        //   if (!explanationLine){
+        //     explanationLine = lines.find(line => line.startsWith('解析:'));
+        //     explanation.value = explanationLine.replace('解析:', '').trim();
+        //   } else if (explanationLine) {
+        //     explanation.value = explanationLine.replace('解析：', '').trim();
+        //   }
+        // }
 
         // 问答题解析
         if (questionType.value === 'qa') {
           question.value = lines[0];
-          const answerLine = lines.find(line => line.startsWith('答案：'));
+          let answerLine = lines.find(line => line.startsWith('答案：'));
           if (!answerLine){
             answerLine = lines.find(line => line.startsWith('答案:'));
             correct_answer.value = answerLine.replace('答案:', '').trim();
           } else if (answerLine) {
             correct_answer.value = answerLine.replace('答案：', '').trim();
           }
-          const explanationLine = lines.find(line => line.startsWith('解析：'));
+          let explanationLine = lines.find(line => line.startsWith('解析：'));
           if (!explanationLine){
             explanationLine = lines.find(line => line.startsWith('解析:'));
             explanation.value = explanationLine.replace('解析:', '').trim();
@@ -382,14 +417,14 @@
           additionalHints.value = lines.slice(2, 6);
 
           // 处理正确答案和解析
-          const answerLine = lines.find(line => line.startsWith('答案：'));
+          let answerLine = lines.find(line => line.startsWith('答案：'));
           if (!answerLine){
             answerLine = lines.find(line => line.startsWith('答案:'));
             correct_answer.value = answerLine.replace('答案:', '').trim();
           } else if (answerLine) {
             correct_answer.value = answerLine.replace('答案：', '').trim();
           }
-          const explanationLine = lines.find(line => line.startsWith('解析：'));
+          let explanationLine = lines.find(line => line.startsWith('解析：'));
           if (!explanationLine){
             explanationLine = lines.find(line => line.startsWith('解析:'));
             explanation.value = explanationLine.replace('解析:', '').trim();
@@ -596,6 +631,8 @@
         closeFinalResults,
         exposeAnswer,
         setExposeAnswer,
+        reconnectTimeout,
+        handleInput,
       };
     }
   };
