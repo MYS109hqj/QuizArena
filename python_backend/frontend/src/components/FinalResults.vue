@@ -45,7 +45,7 @@
           name: player.name,
           avatar: player.avatar,
           score: player.score || 0, // 计分模式的得分
-          lives: player.lostLives !== null ? (3 - player.lostLives) : 3 // 假设初始生命是 3
+          lives: player.lives || 0 // 假设初始生命是 3
         }));
       },
       sortedPlayers() {

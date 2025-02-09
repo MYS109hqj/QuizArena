@@ -1,6 +1,7 @@
 <template>
     <div class="online-players">
       <div class="round-info">
+        <p>房间模式: {{ currentMode }}</p>
         <p>当前轮次: {{ currentRound }} / {{ totalRounds }}</p>
       </div>
       <h2>在线玩家:</h2>

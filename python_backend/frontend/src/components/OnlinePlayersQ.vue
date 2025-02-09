@@ -1,6 +1,7 @@
 <!-- OnlinePlayers.vue -->
 <template>
     <div v-if="onlinePlayers.length > 0" class="online-players">
+      <p>房间模式: {{ currentMode }}</p>
       <h2>在线玩家:</h2>
       <ul>
         <li v-for="(player, index) in onlinePlayers" :key="index">

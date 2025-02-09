@@ -206,6 +206,7 @@ export default {
           name: name.trim(),
           avatar: avatarUrl.trim() || '',
           text: answer.value.trim(),
+          timestamp: new Date().toLocaleString(),
         };
         socket.send(JSON.stringify(answerData));
         answer.value = ''; // 清空输入框
@@ -222,6 +223,7 @@ export default {
           name: name.trim(),
           avatar: avatarUrl.trim() || '',
           text: `选项 ${String.fromCharCode(65 + selectedOption.value)}`, // 例如选项 A、B、C 等
+          timestamp: new Date().toLocaleString(),
         };
         socket.send(JSON.stringify(answerData));
         selectedOption.value = null; // 清空选择

@@ -6,7 +6,7 @@
         <option value="scoring">计分模式</option>
         <option value="survival">生存模式</option>
       </select>
-      <button @click="updateMode" class="update-button">更新房间模式</button>
+      <!-- <button @click="updateMode" class="update-button">更新房间模式</button> -->
     </div>
   </template>
   

@@ -46,9 +46,11 @@ export default {
     // 备选头像 URL 列表
     const avatarOptions = ref([
       'https://i0.hippopx.com/photos/562/605/256/coffee-cup-of-coffee-coffee-beans-drink-preview.jpg',
-      'https://i0.hippopx.com/photos/185/495/582/coffee-cup-coffee-cup-cafe-preview.jpg',
+      'https://i0.hippopx.com/photos/16/106/420/hummingbird-anna-s-hummingbird-bird-preview.jpg',
       'https://i0.hippopx.com/photos/811/1016/50/woman-model-street-beijing-beauty-preview.jpg',
       'https://i0.hippopx.com/photos/768/377/295/lighthouse-sea-water-eastbourne-preview.jpg',
+      'https://i0.hippopx.com/photos/486/41/106/coding-computer-hacker-hacking-preview.jpg',
+      'https://i0.hippopx.com/photos/139/572/1003/macro-macro-photo-macro-photography-close-preview.jpg',
     ]);
 
     // 生成唯一用户 ID 的函数
