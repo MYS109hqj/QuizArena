@@ -16,6 +16,9 @@
           placeholder="或输入自定义头像 URL" 
           class="input-field" 
         />
+        <div class="avatar-preview" v-if="avatarUrl">
+          <img :src="avatarUrl" alt="头像预览" class="avatar-image" />
+        </div>
       </div>
       <input v-model="roomId" placeholder="输入房间 ID" class="input-field" />
       <button @click="enterRoom" class="primary-button">进入房间</button>
@@ -192,5 +195,24 @@ h1 {
 
 .primary-button:hover {
   background-color: #2ecc71;
+}
+
+.avatar-container {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  width: 100%;
+  max-width: 400px;
+}
+
+.avatar-preview {
+  margin-left: 10px;
+}
+
+.avatar-image {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%; /* 圆形 */
+  object-fit: cover; /* 确保图片填满整个区域 */
 }
 </style>

@@ -51,12 +51,18 @@ class Room:
             # print("功能：删除超时未重连的玩家")
             await asyncio.sleep(self.reconnect_timeout)  # 非阻塞的延迟
             current_time = time.time()
-            # print("功能：删除超时未重连的玩家，2")
+            # print(f"功能：删除超时未重连的玩家。目前reconnect_timeout为{self.reconnect_timeout}")
             # 判断是否超过重连时间
-            # print(current_time,player.last_active_timestamp,self.reconnect_timeout)
-            if current_time - player.last_active_timestamp >= self.reconnect_timeout:
+            # print(f"current_time:{current_time}; player.last_active_timestamp:{player.last_active_timestamp}")
+            if current_time - player.last_active_timestamp >= self.reconnect_timeout - 0.1: # 由于调用time方法会有时间误差，因此
+                print("Into delete information part")
                 del self.players[player_id]  # 超时，移除玩家数据
-                print(f"玩家 {player_id} 超时未重连，已删除数据")
+                for websocket, pid in list(self.connection_to_player.items()):
+                    if pid == player_id:
+                        del self.connection_to_player[websocket]
+                        print(f"玩家 {player_id} 的 WebSocket 连接已从 connection_to_player 中移除")
+                        break
+                print(f"玩家 {player_id} 超时未重连，已删除该玩家数据")
 
 # 管理所有房间的连接
 class ConnectionManager:
@@ -407,4 +413,4 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
     except WebSocketDisconnect:
         user_id = player_info['id']
         await manager.disconnect(room_id, websocket, user_id)
-        print(f"已删除{user_id}的websocket")
+        print(f"已删除一个源于{user_id}的websocket连接")

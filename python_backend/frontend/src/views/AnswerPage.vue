@@ -21,7 +21,7 @@
           <!-- 问答题类型 -->
           <div v-if="receivedQuestion.content.type === 'qa'">
             <input v-model="answer" placeholder="输入答案" />
-            <button @click="sendAnswer">提交答案</button>
+            <button @click="sendAnswer" class="primary-button">提交答案</button>
           </div>
 
           <!-- 选择题类型 -->
@@ -33,7 +33,7 @@
                 {{ String.fromCharCode(65 + index) }}. {{ option }}
               </button>
             </div>
-            <button @click="submitMCQAnswer" :disabled="selectedOption === null">提交答案</button>
+            <button @click="submitMCQAnswer" :disabled="selectedOption === null" class="primary-button">提交答案</button>
           </div>
           
           <!-- 多提示题类型 -->
@@ -53,6 +53,7 @@
         <div v-if="awaitingJudgement">
           <p>答案已提交，等待提问者判题...</p>
         </div>
+        <div v-else><p>答案仍未提交</p></div>
 
         <!-- 清空答案按钮 -->
         <div class="button-group">
@@ -351,11 +352,22 @@ export default {
   margin-top: 20px;
 }
 
+.primary-button {
+  /* background-color: #3498db;
+  color: white; */
+  border: none;
+  padding: 15px 30px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+
 .secondary-button {
   background-color: #f39c12;
   color: white;
   border: none;
-  padding: 10px 20px;
+  padding: 15px 30px;
   border-radius: 5px;
   cursor: pointer;
 }
