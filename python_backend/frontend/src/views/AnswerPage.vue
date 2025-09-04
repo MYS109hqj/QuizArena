@@ -99,7 +99,7 @@
 </template>
 
 <script>
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 
 import ConnectionStatus from '../components/ConnectionStatus.vue';
@@ -116,7 +116,8 @@ export default {
   },
   setup() {
     const route = useRoute();
-    const socket = new WebSocket(`${import.meta.env.VITE_WEBSOCKET_URL}/${route.params.roomId}`);
+    const socket = new WebSocket(`${import.meta.env.VITE_WEBSOCKET_URL}/${route.params.roomId}/quiz`);
+    const timeOffset = ref(0);
     const name = route.query.name || 'your name';
     const avatarUrl = route.query.avatarUrl || '';
     const userId = route.query.playerId || generateUniqueId();  // 从路由查询参数中获取 playerId 或生成新的 ID
@@ -145,6 +146,17 @@ export default {
       return 'user-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
     }
 
+      // 新增：请求服务器时间并计算偏移量
+    const syncTimeWithServer = () => {
+      if (socket.readyState === WebSocket.OPEN) {
+        const clientRequestTime = Date.now();  // 客户端发送请求时的时间（毫秒）
+        socket.send(JSON.stringify({
+          type: 'sync_time',
+          clientRequestTime: clientRequestTime
+        }));
+      }
+    };
+
     // WebSocket 消息处理
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -160,6 +172,7 @@ export default {
       } else if (data.type === 'answer') {
         answers.value.push(data);  // 添加新答案
       } else if (data.type === 'player_list') {
+        console.log("playerlist:",data)
         players.value = data.players;  // 更新玩家列表
         questionerConnected.value = data.questionerConnected;  // 更新提问者连接状态
       } else if (data.type === 'judgement_complete') {
@@ -177,6 +190,16 @@ export default {
       } else if (data.type === 'congratulations_complete') {
         finalResultsData.value = data.results; // 服务器返回的最终分数或生命值数据
         isFinalResultsVisible.value = true;  // 显示结算窗口
+      } 
+      // 新增：处理服务器返回的时间同步响应
+      else if (data.type === 'time_sync_response') {
+        const clientReceiveTime = Date.now();  // 客户端接收响应时的时间（毫秒）
+        const serverTime = data.serverTime;    // 服务器收到请求时的时间（毫秒）
+        // 计算偏移量：服务器时间 = 客户端平均时间 + 偏移量
+        // 平均时间 = (发送请求时间 + 接收响应时间) / 2
+        const clientAverageTime = (data.clientRequestTime + clientReceiveTime) / 2;
+        timeOffset.value = serverTime - clientAverageTime;
+        console.log(`时间同步完成，偏移量：${timeOffset.value}ms`);
       }
     };
 
@@ -191,6 +214,10 @@ export default {
         avatar: avatarUrl.trim() || '',
       };
       socket.send(JSON.stringify(joinData));
+
+      // 连接成功后立即进行时间同步，并定期同步（每30秒）
+      syncTimeWithServer();
+      setInterval(syncTimeWithServer, 30000);
     };
 
     socket.onclose = () => {
@@ -198,37 +225,41 @@ export default {
           isConnected.value = false;
     };
 
-    // 提交文本答案
+    // 提交文本答案（修改时间戳为校准后的毫秒级）
     const sendAnswer = () => {
       if (socket.readyState === WebSocket.OPEN && answer.value.trim() !== '') {
-        const answerData = {
-          type: 'answer',
-          playerId: userId,  // 包含 playerId 以便提问者识别
-          name: name.trim(),
-          avatar: avatarUrl.trim() || '',
-          text: answer.value.trim(),
-          timestamp: new Date().toLocaleString(),
-        };
-        socket.send(JSON.stringify(answerData));
-        answer.value = ''; // 清空输入框
-        awaitingJudgement.value = true;  // 等待判题
-      }
-    };
-
-    // 提交选择题答案
-    const submitMCQAnswer = () => {
-      if (selectedOption.value !== null) {
+        // 校准后的时间戳 = 客户端当前时间 + 偏移量（确保与服务器时间一致）
+        console.log( Date.now(),timeOffset.value)
+        const calibratedTimestamp = Math.round(Date.now() + timeOffset.value);
         const answerData = {
           type: 'answer',
           playerId: userId,
           name: name.trim(),
           avatar: avatarUrl.trim() || '',
-          text: `选项 ${String.fromCharCode(65 + selectedOption.value)}`, // 例如选项 A、B、C 等
-          timestamp: new Date().toLocaleString(),
+          text: answer.value.trim(),
+          timestamp: calibratedTimestamp,  // 改为校准后的毫秒级时间戳
         };
         socket.send(JSON.stringify(answerData));
-        selectedOption.value = null; // 清空选择
-        awaitingJudgement.value = true;  // 等待判题
+        answer.value = '';
+        awaitingJudgement.value = true;
+      }
+    };
+
+    // 提交选择题答案（同样修改时间戳）
+    const submitMCQAnswer = () => {
+      if (selectedOption.value !== null) {
+        const calibratedTimestamp = Math.round(Date.now() + timeOffset.value);
+        const answerData = {
+          type: 'answer',
+          playerId: userId,
+          name: name.trim(),
+          avatar: avatarUrl.trim() || '',
+          text: `选项 ${String.fromCharCode(65 + selectedOption.value)}`,
+          timestamp: calibratedTimestamp,  // 校准后的毫秒级时间戳
+        };
+        socket.send(JSON.stringify(answerData));
+        selectedOption.value = null;
+        awaitingJudgement.value = true;
       }
     };
 

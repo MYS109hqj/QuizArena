@@ -241,7 +241,7 @@
           return; // 如果房间 ID 为空，则不创建连接
         }
   
-        socket.value = new WebSocket(`${import.meta.env.VITE_WEBSOCKET_URL}/${questionRoomId.value}`);
+        socket.value = new WebSocket(`${import.meta.env.VITE_WEBSOCKET_URL}/${questionRoomId.value}/quiz`);
   
         socket.value.onopen = () => {
           console.log('WebSocket connection opened');
