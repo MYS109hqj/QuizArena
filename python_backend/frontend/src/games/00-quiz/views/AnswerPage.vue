@@ -105,7 +105,7 @@ import { useRoute } from 'vue-router';
 import ConnectionStatus from '../components/ConnectionStatus.vue';
 import OnlinePlayersA from '../components/OnlinePlayersA.vue';
 import JudgementResults from '../components/JudgementResults.vue';
-import FinalResults from '@/components/FinalResults.vue';
+import FinalResults from '../components/FinalResults.vue';
 
 export default {
   components: {

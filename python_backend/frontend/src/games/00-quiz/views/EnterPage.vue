@@ -78,7 +78,7 @@ export default {
 
         // 将 playerId 作为查询参数带入 AnswerPage
         router.push({
-          name: 'AnswerPage',
+          name: 'QuizAnswerPage',
           params: {
             roomId: roomId.value.trim(),
           },
@@ -107,7 +107,7 @@ export default {
 
         // 将 playerId 作为查询参数带入 QuestionPage
         router.push({
-          name: 'QuestionPage',
+          name: 'QuizQuestionPage',
           params: {
             roomId: questionRoomId.value.trim()
           },

@@ -1,42 +1,64 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import EnterPage from '../views/EnterPage.vue';
-import AnswerPage from '../views/AnswerPage.vue';
-import QuestionPage from '../views/QuestionPage.vue';  // 添加提问端的组件
-import TestPage from '../views/testPage.vue';
+
+// 00-quiz 游戏相关页面
+import EnterPage_Quiz from '../games/00-quiz/views/EnterPage.vue';
+import AnswerPage_Quiz from '../games/00-quiz/views/AnswerPage.vue';
+import QuestionPage_Quiz from '../games/00-quiz/views/QuestionPage.vue';
+import TestPage_Quiz from '../games/00-quiz/views/testPage.vue';
+
+// 01-samePatternHunt 游戏相关页面（如有）
+import EnterPage_SamePattern from '../games/01-samePatternHunt/pages/EnterPage.vue';
+// 其它页面...
 
 const routes = [
   {
-    path: '/enter',
-    name: 'EnterPage',
-    component: EnterPage
+    path: '/quiz',
+    children: [
+      {
+        path: 'enter',
+        name: 'QuizEnterPage',
+        component: EnterPage_Quiz
+      },
+      {
+        path: 'answer/:roomId',
+        name: 'QuizAnswerPage',
+        component: AnswerPage_Quiz,
+        props: route => ({
+          roomId: route.params.roomId,
+          name: route.query.name,
+          avatarUrl: route.query.avatarUrl
+        })
+      },
+      {
+        path: 'question/:roomId',
+        name: 'QuizQuestionPage',
+        component: QuestionPage_Quiz,
+        props: route => ({
+          roomId: route.params.roomId
+        })
+      },
+      {
+        path: 'test',
+        name: 'QuizTestPage',
+        component: TestPage_Quiz
+      }
+    ]
   },
   {
-    path: '/answer/:roomId',
-    name: 'AnswerPage',
-    component: AnswerPage,
-    props: route => ({
-      roomId: route.params.roomId,
-      name: route.query.name,
-      avatarUrl: route.query.avatarUrl
-    })
-  },
-  {
-    path: '/question/:roomId',
-    name: 'QuestionPage',
-    component: QuestionPage,
-    props: route => ({
-      roomId: route.params.roomId
-    })
-  },
-  {
-    path: '/test',  // 设置 URL 路径
-    name: 'TestPage',
-    component: TestPage // 绑定组件
+    path: '/samePatternHunt',
+    children: [
+      {
+        path: 'enter',
+        name: 'SamePatternEnterPage',
+        component: EnterPage_SamePattern
+      }
+      // 其它 samePatternHunt 游戏页面...
+    ]
   },
   {
     path: '/',
-    redirect: '/enter',
-  },
+    redirect: '/quiz/enter'
+  }
 ];
 
 const router = createRouter({
