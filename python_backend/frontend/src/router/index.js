@@ -8,7 +8,10 @@ import TestPage_Quiz from '../games/00-quiz/views/testPage.vue';
 
 // 01-samePatternHunt 游戏相关页面（如有）
 import EnterPage_SamePattern from '../games/01-samePatternHunt/pages/EnterPage.vue';
-// 其它页面...
+import GameLobby from '../games/01-samePatternHunt/pages/GameLobby.vue';
+import RoomPage from '../games/01-samePatternHunt/pages/RoomPage.vue';
+import GamePage from '../games/01-samePatternHunt/pages/GamePage.vue';
+import ResultPage from '../games/01-samePatternHunt/pages/ResultPage.vue';
 
 const routes = [
   {
@@ -51,13 +54,16 @@ const routes = [
         path: 'enter',
         name: 'SamePatternEnterPage',
         component: EnterPage_SamePattern
-      }
-      // 其它 samePatternHunt 游戏页面...
+      },
+      { path: '', name: 'SPHLobby', component: GameLobby },
+      { path: 'room/:roomId', name: 'SPHRoom', component: RoomPage },
+      { path: 'game/:roomId', name: 'SPHGame', component: GamePage },
+      { path: 'result/:roomId', name: 'SPHResult', component: ResultPage },
     ]
   },
   {
     path: '/',
-    redirect: '/quiz/enter'
+    redirect: '/samePatternHunt'
   }
 ];
 

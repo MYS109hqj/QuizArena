@@ -3,12 +3,13 @@ import time
 from typing import Dict, Any, List
 from fastapi import WebSocket
 from .base import BaseGame
-from models.player import Player
+from app.models.player import Player
 
 class QuizGame(BaseGame):
     """答题游戏实现"""
     def __init__(self, room_id: str):
         super().__init__(room_id)
+        self.connections: Dict[WebSocket, str] = {}  # 连接->玩家ID映射
         self.current_question: Dict[str, Any] = None
         self.current_question_id: str = None  # 新增：记录当前题目ID
         self.current_answers: Dict[str, str] = {}  # 玩家ID->答案
@@ -20,7 +21,7 @@ class QuizGame(BaseGame):
             "expose_answer": False  # 答案是否对其他答题者可见
         }
 
-    async def handle_event(self, websocket: WebSocket, event: Dict[str, Any]) -> None:
+    async def handle_event(self, websocket: WebSocket, event: Dict[str, Any], player_id: str) -> None:
         """处理答题游戏特有事件"""
         event_type = event.get("type")
         print(event_type,event)
@@ -64,6 +65,15 @@ class QuizGame(BaseGame):
         }
         # 3. 仅向发起同步的前端返回响应
         await websocket.send_text(json.dumps(sync_response))
+
+    async def update_rules(self, settings):
+        # 暂时只处理模式变更
+        if "rules" in settings:
+            self.mode = settings["rules"].get("mode", self.mode)
+            await self.broadcast({
+                "type": "mode_change",
+                "currentMode": self.mode
+            })
 
     async def _handle_mode_change(self, event: Dict[str, Any]) -> None:
         self.mode = event["mode"]
