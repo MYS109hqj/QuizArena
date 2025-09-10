@@ -15,9 +15,9 @@ class o2SPHGame(RoundBaseGame):
         self.scores: Dict[str, int] = {}  # playerId -> score
         self.locked: bool = False
 
-    def handle_event(self, websocket, event, player_id):
+    async def handle_event(self, websocket, event, player_id):
         action = event.get("action")
-        if action == "00":
+        if action == "":
             temp00 = event.get("00")
 
             # 这里可以添加评分、进度更新等逻辑
@@ -33,7 +33,7 @@ class o2SPHGame(RoundBaseGame):
             })
 
     async def start_game(self, mode="single", total_rounds=1):
-        super().start_game(mode, total_rounds)
+        await super().start_game(mode, total_rounds)
         self.cards = self._init_cards()
         self.scores = {pid: 10 for pid in self.player_order}
         self.locked = False

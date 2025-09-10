@@ -14,38 +14,67 @@
           {{ p.ready ? '已准备' : '未准备' }}
         </span>
         
-        <!-- 房主的准备按钮逻辑 -->
-        <button v-if="key === store.player_id && key === store.room?.owner?.id" @click="toggleReady">
+        <!-- 游戏进行中时，隐藏所有准备按钮 -->
+        <button 
+          v-if="!isPlaying && key === store.player_id && key === store.room?.owner?.id" 
+          @click="toggleReady"
+        >
           取消准备
         </button>
-        
-        <!-- 普通玩家的准备按钮逻辑 -->
-        <button v-if="key === store.player_id && key !== store.room?.owner?.id" @click="toggleReady">
+        <button 
+          v-if="!isPlaying && key === store.player_id && key !== store.room?.owner?.id" 
+          @click="toggleReady"
+        >
           {{ p.ready ? '取消准备' : '准备' }}
         </button>
       </div>
     </div>
     
-    <!-- 房主的特殊按钮 -->
-    <div v-if="isOwner">
-      <button @click="startGame" class="green-btn" :disabled="!allPlayersReady">
-        开始游戏
-      </button>
-      <button @click="modifySettings" class="green-btn">修改设置</button>
+    <!-- 游戏进行中时，显示提示和跳转按钮 -->
+    <div v-if="isPlaying" class="game-started提示">
+      <p>⚠️ 游戏已开始！请前往游戏页面。</p>
+      <button @click="goToGamePage" class="green-btn">进入游戏</button>
     </div>
     
-    <button @click="leaveRoom" class="green-btn">返回大厅</button>
+    <!-- 游戏未开始时，显示房主按钮和返回大厅按钮 -->
+    <div v-else>
+      <!-- 房主的特殊按钮 -->
+      <div v-if="isOwner">
+        <button @click="startGame" class="green-btn" :disabled="!allPlayersReady">
+          开始游戏
+        </button>
+        <button @click="modifySettings" class="green-btn">修改设置</button>
+      </div>
+      
+      <button @click="leaveRoom" class="green-btn">返回大厅</button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
 import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore';
 
 const store = useSamePatternHuntStore();
 const router = useRouter();
 const route = useRoute();
+
+const isPlaying = ref(false);
+// 监听房间状态变化
+watch(
+  () => store.gameStatus,
+  (newStatus) => {
+    if (newStatus === 'playing') {
+      isPlaying.value = newStatus === 'playing';
+      router.replace({ 
+        name: 'SPHGame', 
+        params: { roomId: store.room.room_id } 
+      });
+    }
+  },
+  { immediate: true }
+);
 
 // 确保在组件加载时尝试加入房间
 if (!store.room || store.room.room_id !== route.params.roomId) {
@@ -79,13 +108,19 @@ function modifySettings() {
 
 function leaveRoom() {
   // 离开房间逻辑
-  store.disconnect();
   router.push({ name: 'SPHLobby' });
+}
+
+function goToGamePage() {
+  router.replace({ 
+    name: 'SPHGamePage', 
+    params: { roomId: store.room?.room_id } 
+  });
 }
 
 // 监听页面可见性变化（刷新/关闭）
 const handlePageUnload = () => {
-  store.disconnect();
+  // store.disconnect();
 };
 
 onMounted(() => {
@@ -96,14 +131,22 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', handlePageUnload);
 });
 
-// 监听路由离开（点击后退或其他导航）
+// 监听路由离开（点击后退或其他导航）,store的重置完全交由该方法处理
 onBeforeRouteLeave((to, from, next) => {
-  const confirmLeave = window.confirm('你确定要离开房间吗？这将断开连接。');
-  if (confirmLeave) {
-    store.disconnect(); // 断开连接
-    next(); // 允许跳转
+  // 定义允许直接跳转的目标路由（游戏页面）
+  const allowedTargets = ['SPHGame'];
+  console.log(to,to.name);
+  if (allowedTargets.includes(to.name)) {
+    next();
   } else {
-    next(false); // 阻止跳转
+    // 其他情况（返回大厅、浏览器回退等）显示确认弹窗
+    const confirmLeave = window.confirm('你确定要离开房间吗？这将断开连接。');
+    if (confirmLeave) {
+      next();
+      store.disconnect(); 
+    } else {
+      next(false);
+    }
   }
 });
 </script>
@@ -121,4 +164,17 @@ onBeforeRouteLeave((to, from, next) => {
 .status-tag { padding: 2px 8px; border-radius: 12px; font-size: 0.8em; }
 .ready { background-color: #d4edda; color: #155724; }
 .not-ready { background-color: #f8d7da; color: #721c24; }
+.game-started提示 {
+  margin: 20px 0;
+  padding: 16px;
+  background-color: #fff3cd;
+  border: 1px solid #ffeeba;
+  border-radius: 8px;
+  text-align: center;
+}
+.game-started提示 p {
+  color: #856404;
+  font-size: 1.1em;
+  margin-bottom: 12px;
+}
 </style>

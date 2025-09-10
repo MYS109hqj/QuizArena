@@ -16,7 +16,7 @@ class RoundBaseGame(BaseGame):
         self.mode = "single"  # 或 "double"
         self.player_order: List[str] = []
 
-    def start_game(self, mode="single", total_rounds=1):
+    async def start_game(self, mode="single", total_rounds=1):
         self.state = "player_turn"
         self.mode = mode
         self.total_rounds = total_rounds
@@ -24,7 +24,7 @@ class RoundBaseGame(BaseGame):
         self.player_order = self._init_player_order()
         self.current_player = self.player_order[0]
         # 广播游戏状态
-        self.broadcast_game_state()
+        await self.broadcast_game_state()
 
     def _init_player_order(self) -> List[str]:
         # 单人模式：只有一个玩家；双人模式：随机排序
