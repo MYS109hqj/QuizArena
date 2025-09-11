@@ -3,6 +3,11 @@
 java版nginx配置.txt
 python版nginx配置.txt
 FirstGameMCQ.md
-
+/python_backend/frontend/src/ws
+/python_backend/frontend/src/stores
+*/__pycache__/
 .idea/
 .vscode/
+/240226Find-same-patterns
+02-README.md
+02-笔记/

@@ -16,14 +16,12 @@ class o2SPHGame(RoundBaseGame):
         self.locked: bool = False
 
     async def handle_event(self, websocket, event, player_id):
+        if event is None:
+            await self.broadcast_to_player(player_id, {"type": "error", "msg": "无效事件"})
+            return
         action = event.get("action")
-        if action == "":
-            temp00 = event.get("00")
+        await self.process_action(player_id, action)
 
-            # 这里可以添加评分、进度更新等逻辑
-            return {"status": "answer_received", "player_id": player_id, "answer": temp00}
-        else:
-            return {"error": "未知的动作"}
 
     async def update_rules(self, settings):
         if "rules" in settings:
@@ -39,7 +37,7 @@ class o2SPHGame(RoundBaseGame):
         self.locked = False
 
         # 为每位玩家生成目标序列
-        pattern_ids = [f"pattern{i}" for i in range(1, 17)]
+        pattern_ids = [f"{i}" for i in range(1, 17)]
         for pid in self.player_order:
             seq = []
             for _ in range(3):
@@ -61,7 +59,7 @@ class o2SPHGame(RoundBaseGame):
     def _init_cards(self):
         # 生成16张卡牌，每张有cardId和patternId
         import random
-        pattern_ids = [f"pattern{i}" for i in range(1, 17)]
+        pattern_ids = [f"{i}" for i in range(1, 17)]
         random.shuffle(pattern_ids)
         cards = {}
         for idx, pattern_id in enumerate(pattern_ids):
@@ -74,6 +72,9 @@ class o2SPHGame(RoundBaseGame):
         return cards
 
     async def process_action(self, player_id, action):
+        if action is None:
+            await self.broadcast_to_player(player_id, {"type": "error", "msg": "动作信息缺失"})
+            return
         if self.locked:
             await self.broadcast_to_player(player_id, {"type": "error", "message": "有动作正在进行"})
             return
@@ -101,6 +102,7 @@ class o2SPHGame(RoundBaseGame):
             # 仍然是该玩家轮次
         else:
             self.scores[player_id] = self.scores.get(player_id, 0) - 1
+            self.round += 1
             # 轮到下一位玩家
             self.current_player = self.next_player()
 
