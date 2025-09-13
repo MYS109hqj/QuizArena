@@ -69,6 +69,16 @@ const handleClick = () => {
     }
   }
   
+  // 检查等待他人翻回限制
+  if (rules.flipRestrictions.waitForOthersToFlipBack && isMyTurn.value) {
+    // 这里需要后端支持来检查其他玩家的翻牌状态
+    // 前端只能做基本提示，具体逻辑由后端处理
+    if (store.gameState?.state === 'locked') {
+      alert('其他玩家翻开的牌未翻回，无法立刻翻牌');
+      return;
+    }
+  }
+  
   // 检查行动锁定限制（后端会处理，这里只是前端提示）
   if (rules.flipRestrictions.actionLockEnabled && store.gameState?.state === 'locked') {
     alert('有行动正在进行，暂不能进行下一次翻牌');
@@ -133,6 +143,7 @@ const getPatternImage = (patternId) => {
 
 .card.unmatched .card-inner {
   border: 2px solid #ef4444;
+  box-sizing: border-box;
 }
 
 .card-front,
@@ -149,19 +160,30 @@ const getPatternImage = (patternId) => {
 }
 
 .card-front {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #4caf50 0%, #3a9d6a 100%);
+}
+
+.card-front img {
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .card-back {
   background: white;
   transform: rotateY(180deg);
-  padding: 8px;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .card-img {
   width: 80%;
   height: 80%;
   object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .placeholder {

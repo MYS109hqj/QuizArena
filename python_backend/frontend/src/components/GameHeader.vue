@@ -44,30 +44,40 @@ const currentPlayerName = computed(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
-  padding: 0 10px;
+  padding: 12px 20px;
   position: relative;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
 }
 .turn-indicator {
-  color: #27ae60;
-  font-weight: bold;
+  color: #2e7d32;
+  font-weight: 600;
   margin-left: 15px;
-  padding: 3px 8px;
-  background: rgba(39, 174, 96, 0.1);
-  border-radius: 4px;
+  padding: 6px 12px;
+  background: rgba(46, 125, 50, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(46, 125, 50, 0.2);
 }
 
 .rules-btn {
-  padding: 6px 12px;
-  background: #3498db;
+  padding: 8px 16px;
+  background: #3a9d6a;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(58, 157, 106, 0.3);
 }
 
 .rules-btn:hover {
-  background: #2980b9;
+  background: #2e7d32;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(46, 125, 50, 0.4);
 }
 
 /* 模态框样式 */
