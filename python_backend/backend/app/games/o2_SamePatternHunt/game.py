@@ -1,5 +1,6 @@
 import json
 import time
+import asyncio
 from typing import Dict, Any, List
 from fastapi import WebSocket
 from app.games.roundBase import RoundBaseGame
@@ -14,20 +15,48 @@ class o2SPHGame(RoundBaseGame):
         self.player_target_index: Dict[str, int] = {}   # playerId -> 当前目标序列索引
         self.scores: Dict[str, int] = {}  # playerId -> score
         self.locked: bool = False
+        
+        # 规则配置
+        self.game_rules = {
+            "allowSimultaneousActions": True,
+            "flipRestrictions": {
+                "preventFlipDuringAnimation": False,
+                "waitForOthersToFlipBack": False,
+                "actionLockEnabled": True
+            },
+            "animationDuration": 5000,
+            "maxConcurrentFlips": 1,
+            "turnTransitionDelay": 1000
+        }
+        
+        # 全局翻转状态跟踪
+        self.global_flipping_cards: Dict[str, List[str]] = {}  # playerId -> [cardIds]
+        self.flip_start_times: Dict[str, float] = {}  # cardId -> start time
 
     async def handle_event(self, websocket, event, player_id):
         if event is None:
             await self.broadcast_to_player(player_id, {"type": "error", "msg": "无效事件"})
             return
+        
+        # 处理规则更新请求
+        if event.get("type") == "update_rules":
+            await self.update_rules(event)
+            return
+            
         action = event.get("action")
         await self.process_action(player_id, action)
 
 
     async def update_rules(self, settings):
+        """更新游戏规则"""
         if "rules" in settings:
-
+            # 更新规则配置
+            self.game_rules.update(settings["rules"])
+            
+            # 广播规则更新给所有玩家
             await self.broadcast({
-
+                "type": "rules_updated",
+                "rules": self.game_rules
             })
 
     async def start_game(self, mode="single", total_rounds=1):
@@ -35,6 +64,10 @@ class o2SPHGame(RoundBaseGame):
         self.cards = self._init_cards()
         self.scores = {pid: 10 for pid in self.player_order}
         self.locked = False
+        
+        # 重置全局翻转状态
+        self.global_flipping_cards = {}
+        self.flip_start_times = {}
 
         # 为每位玩家生成目标序列
         pattern_ids = [f"{i}" for i in range(1, 17)]
@@ -75,19 +108,57 @@ class o2SPHGame(RoundBaseGame):
         if action is None:
             await self.broadcast_to_player(player_id, {"type": "error", "msg": "动作信息缺失"})
             return
-        if self.locked:
+            
+        # 检查行动锁定规则
+        if self.game_rules["flipRestrictions"]["actionLockEnabled"] and self.locked:
             await self.broadcast_to_player(player_id, {"type": "error", "message": "有动作正在进行"})
             return
+            
         if action.get("type") != "flip":
             await self.broadcast_to_player(player_id, {"type": "error", "msg": "未知动作"})
             return
+            
         card_id = action.get("cardId")
         card = self.cards.get(card_id)
         if not card:
             await self.broadcast_to_player(player_id, {"type": "error", "msg": "卡牌不存在"})
             return
 
+        # 检查动画期间禁止翻牌规则
+        if self.game_rules["flipRestrictions"]["preventFlipDuringAnimation"]:
+            current_time = time.time()
+            for flip_card_id, start_time in self.flip_start_times.items():
+                elapsed = current_time - start_time
+                if elapsed < self.game_rules["animationDuration"] / 1000:
+                    await self.broadcast_to_player(player_id, {
+                        "type": "error", 
+                        "message": "牌未翻回，无法翻开新牌"
+                    })
+                    return
+
+        # 检查等待他人翻回规则
+        if (self.game_rules["flipRestrictions"]["waitForOthersToFlipBack"] and 
+            player_id == self.current_player):
+            current_time = time.time()
+            for other_player_id, flipping_cards in self.global_flipping_cards.items():
+                if other_player_id != player_id:
+                    for flip_card_id in flipping_cards:
+                        start_time = self.flip_start_times.get(flip_card_id, 0)
+                        elapsed = current_time - start_time
+                        if elapsed < self.game_rules["animationDuration"] / 1000:
+                            await self.broadcast_to_player(player_id, {
+                                "type": "error", 
+                                "message": "其他玩家翻开的牌未翻回，无法立刻翻牌"
+                            })
+                            return
+
         self.locked = True
+        # 记录翻牌开始时间
+        self.flip_start_times[card_id] = time.time()
+        # 添加到全局翻转卡片列表
+        if player_id not in self.global_flipping_cards:
+            self.global_flipping_cards[player_id] = []
+        self.global_flipping_cards[player_id].append(card_id)
         # 获取玩家当前目标
         target_idx = self.player_target_index[player_id]
         target_pattern = self.player_targets[player_id][target_idx]
@@ -122,6 +193,24 @@ class o2SPHGame(RoundBaseGame):
         await self.broadcast_game_state()
         # 判断是否结束
         await self.check_end_condition()
+        
+        # 清理翻转状态（在动画结束后）
+        async def cleanup_flip_state():
+            await asyncio.sleep(flip_back / 1000)
+            # 从全局翻转状态中移除
+            if player_id in self.global_flipping_cards:
+                self.global_flipping_cards[player_id] = [
+                    cid for cid in self.global_flipping_cards[player_id] 
+                    if cid != card_id
+                ]
+                if not self.global_flipping_cards[player_id]:
+                    del self.global_flipping_cards[player_id]
+            if card_id in self.flip_start_times:
+                del self.flip_start_times[card_id]
+        
+        # 异步执行清理任务
+        asyncio.create_task(cleanup_flip_state())
+        
         # 解锁
         self.locked = False
 

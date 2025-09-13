@@ -56,6 +56,24 @@ const isMyTurn = computed(() => store.gameState?.current_player === store.player
 // 点击处理
 const handleClick = () => {
   if (!isMyTurn.value || props.flipped) return;
+  
+  // 检查前端规则限制
+  const rules = store.gameRules;
+  
+  // 检查牌未翻回限制
+  if (rules.flipRestrictions.preventFlipDuringAnimation) {
+    const anyCardFlipping = store.flippedCards.length > 0 || store.unmatchedCards.length > 0;
+    if (anyCardFlipping) {
+      alert('牌未翻回，无法翻开新牌');
+      return;
+    }
+  }
+  
+  // 检查行动锁定限制（后端会处理，这里只是前端提示）
+  if (rules.flipRestrictions.actionLockEnabled && store.gameState?.state === 'locked') {
+    alert('有行动正在进行，暂不能进行下一次翻牌');
+    return;
+  }
 
   store.send({
     type: 'action',
