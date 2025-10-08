@@ -54,7 +54,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore';
-import { hasPendingConnection, restoreConnection, connectSPHSocket } from '@/ws/samePatternSocket';
+import { hasPendingConnection, restoreConnection, connectSPHSocket, isWebSocketActive, setRouteChanging } from '@/ws/samePatternSocket';
 import axios from 'axios';
 import GameHeader from '@/components/GameHeader.vue';
 import PlayerStatus from '@/components/PlayerStatus.vue';
@@ -125,23 +125,29 @@ const handleExit = () => {
   router.push({ name: 'SPHLobby' });
 };
 
-function isWebSocketActive() {
-    // 检查全局store中是否有活跃的连接
-    return store.connected && 
-           socket && 
-           socket.readyState === WebSocket.OPEN;
-}
+
 
 
 // 检查并处理重连
 onMounted(async () => {
   const roomId = route.params.roomId;
 
-  // 检查是否有待恢复的连接
+  // 清除路由切换标记（页面加载完成）
+  setTimeout(() => {
+    setRouteChanging(false);
+    sessionStorage.removeItem('SPH_ROUTE_CHANGING');
+  }, 1000);
+
+  // 检查连接状态
   if (isWebSocketActive()) {
-        // 连接活跃，直接使用现有连接
-        console.log('使用现有WebSocket连接');
+    // 连接活跃，直接使用现有连接
+    console.log('使用现有WebSocket连接，不触发重连');
+    // 获取当前游戏状态
+    setTimeout(() => {
+      store.send({ type: 'get_game_state' });
+    }, 500);
   } else if (hasPendingConnection()) {
+    // 异常断开，需要重连
     isReconnecting.value = true;
     reconnectStatus.value = '正在尝试重新连接...';
 
@@ -163,6 +169,8 @@ onMounted(async () => {
           setTimeout(() => {
             isReconnecting.value = false;
             reconnectStatus.value = '';
+            // 获取游戏状态
+            store.send({ type: 'get_game_state' });
           }, 2000);
         } else {
           reconnectStatus.value = '重连失败，正在加入新会话...';
@@ -179,13 +187,10 @@ onMounted(async () => {
       await createNewRoom();
     }
   } else {
-    // 正常加入房间
+    // 全新连接或路由切换后的正常连接
+    console.log('建立新连接或路由切换后的连接');
     await joinNewSession(roomId);
   }
-
-  // 获取当前游戏状态
-  store.send({ type: 'get_game_state' });
-
 });
 
 // 检查房间是否存在

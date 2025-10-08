@@ -55,6 +55,7 @@
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
 import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore';
+import { setRouteChanging } from '@/ws/samePatternSocket';
 
 const store = useSamePatternHuntStore();
 const router = useRouter();
@@ -67,6 +68,10 @@ watch(
   (newStatus) => {
     if (newStatus === 'playing') {
       isPlaying.value = newStatus === 'playing';
+      // 设置路由切换标记，避免触发重连
+      setRouteChanging(true);
+      sessionStorage.setItem('SPH_ROUTE_CHANGING', 'true');
+      
       router.replace({ 
         name: 'SPHGame', 
         params: { roomId: store.room.room_id } 
@@ -112,8 +117,12 @@ function leaveRoom() {
 }
 
 function goToGamePage() {
+  // 设置路由切换标记，避免触发重连
+  setRouteChanging(true);
+  sessionStorage.setItem('SPH_ROUTE_CHANGING', 'true');
+  
   router.replace({ 
-    name: 'SPHGamePage', 
+    name: 'SPHGame', 
     params: { roomId: store.room?.room_id } 
   });
 }
