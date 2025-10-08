@@ -250,4 +250,67 @@ class o2SPHGame(RoundBaseGame):
             # 继续游戏，轮次已在process_action里处理
             pass
 
+    def _get_player_flipping_card(self, card_id: str) -> str:
+        """获取正在翻转某张卡片的玩家ID"""
+        for player_id, flipping_cards in self.global_flipping_cards.items():
+            if card_id in flipping_cards:
+                return player_id
+        return None
+
+    async def get_card_flip_status(self):
+        """获取当前所有卡牌的翻转状态"""
+        flip_status = {}
+        current_time = time.time()
+        
+        for card_id, start_time in self.flip_start_times.items():
+            elapsed = current_time - start_time
+            animation_duration = self.game_rules["animationDuration"] / 1000
+            
+            if elapsed < animation_duration:
+                # 卡牌正在翻转中
+                remaining = animation_duration - elapsed
+                flip_status[card_id] = {
+                    "flipping": True,
+                    "remaining_time": remaining * 1000,  # 毫秒
+                    "flipped_by": self._get_player_flipping_card(card_id)
+                }
+            else:
+                # 卡牌已翻转完成或超时
+                flip_status[card_id] = {"flipping": False}
+        
+        # 添加未在翻转中的卡牌状态
+        for card_id in self.cards.keys():
+            if card_id not in flip_status:
+                flip_status[card_id] = {"flipping": False}
+                
+        return flip_status
+
+    async def on_player_reconnect(self, player_id: str):
+        """处理玩家重连，发送完整状态同步"""
+        # 发送完整的游戏状态
+        await self.broadcast_game_state()
+        
+        # 发送当前所有卡牌状态
+        await self.broadcast_to_player(player_id, {
+            "type": "cards_sync",
+            "cards": self.cards
+        })
+        
+        # 发送卡牌瞬态翻转状态
+        flip_status = await self.get_card_flip_status()
+        await self.broadcast_to_player(player_id, {
+            "type": "flip_status_sync", 
+            "flip_status": flip_status
+        })
+        
+        # 发送玩家个人进度
+        await self.broadcast_to_player(player_id, {
+            "type": "player_sync",
+            "targets": self.player_targets[player_id],
+            "current_index": self.player_target_index[player_id],
+            "score": self.scores[player_id]
+        })
+        
+        print(f"玩家 {player_id} 重连状态同步完成")
+
 

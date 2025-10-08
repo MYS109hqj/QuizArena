@@ -99,7 +99,9 @@ const letterOrder = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',
 
 // 获取字母图片（根据 cardIndex）
 const getLetterImage = (index) => {
-  const letter = letterOrder[index];
+  // 确保 index 是数字类型
+  const numericIndex = Number(index);
+  const letter = letterOrder[numericIndex];
   return new URL(`/assets/letters/${letter}.png`, import.meta.url).href;
 };
 

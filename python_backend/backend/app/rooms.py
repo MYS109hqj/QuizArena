@@ -8,7 +8,7 @@ class Room:
     def __init__(self, room_id: str, game: BaseGame, owner_info: Dict = None, name: str = ""):
         self.room_id = room_id
         self.game = game
-        self.reconnect_timeout = 5
+        self.reconnect_timeout = 30  # 增加到30秒，为玩家重连提供充足时间
         self.owner = owner_info if owner_info and "id" in owner_info and "name" in owner_info else None
         self.name = name or room_id
         self.status = "waiting"  # waiting, playing, ended
@@ -165,10 +165,22 @@ class Room:
             "min_players": self.game.config.get("min_players", 2)
         }
         
+        # 使用字典键的副本进行遍历，避免并发修改问题
+        disconnected_websockets = []
+        for websocket in list(self.connections.keys()):
+            try:
+                await websocket.send_json(room_state)
+            except (RuntimeError, Exception) as e:
+                # 记录断开连接的websocket，稍后清理
+                disconnected_websockets.append(websocket)
+                print(f"发送房间状态失败: {e}")
         
-        # 发送给所有连接
-        for websocket in self.connections:
-            await websocket.send_json(room_state)
+        # 清理断开连接的websocket
+        for websocket in disconnected_websockets:
+            if websocket in self.connections:
+                player_id = self.connections[websocket]
+                del self.connections[websocket]
+                print(f"清理断开连接的WebSocket: 玩家 {player_id}")
 
     def on_empty(self, callback):
         """注册房间为空时的回调（用于销毁）"""

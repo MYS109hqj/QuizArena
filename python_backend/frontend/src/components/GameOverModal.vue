@@ -10,7 +10,10 @@
           <span class="player-score">分数：{{ p.score }}</span>
         </div>
       </div>
-      <button @click="onLeave" class="green-btn">返回大厅</button>
+      <div class="button-group">
+        <button @click="onPlayAgain" class="green-btn">再来一局</button>
+        <button @click="onLeave" class="gray-btn">返回大厅</button>
+      </div>
     </div>
   </div>
 </template>
@@ -23,7 +26,11 @@ defineProps({
   rankedPlayers: { type: Array, default: () => [] }
 });
 
-const emit = defineEmits(['leave']);
+const emit = defineEmits(['leave', 'playAgain']);
+
+const onPlayAgain = () => {
+  emit('playAgain');
+};
 
 const onLeave = () => {
   if (confirm('确定要退出游戏吗？')) {
@@ -88,7 +95,41 @@ const medalEmoji = (index) => {
   transition: background 0.3s;
 }
 
+.button-group {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.green-btn {
+  background: #27ae60;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 8px rgba(39, 174, 96, 0.5);
+  cursor: pointer;
+  font-size: 1em;
+  transition: background 0.3s;
+}
+
 .green-btn:hover {
   background: #219653;
+}
+
+.gray-btn {
+  background: #95a5a6;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1em;
+  transition: background 0.3s;
+}
+
+.gray-btn:hover {
+  background: #7f8c8d;
 }
 </style>

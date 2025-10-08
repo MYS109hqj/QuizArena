@@ -143,6 +143,7 @@ onBeforeRouteLeave((to, from, next) => {
     const confirmLeave = window.confirm('你确定要离开房间吗？这将断开连接。');
     if (confirmLeave) {
       next();
+      console.log("通过RoomPage的onBeforeRouteLeave断开了websocket连接")
       store.disconnect(); 
     } else {
       next(false);
