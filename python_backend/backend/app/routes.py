@@ -130,3 +130,33 @@ async def check_room_exists(game_type: str, room_id: str):
     game_rooms = rooms.get(game_type, {})
     exists = room_id in game_rooms
     return {"exists": exists}
+
+@router.get("/api/room-info/{room_id}")
+async def get_room_info(room_id: str):
+    """获取房间基本信息（用于预加载）"""
+    print(f"🔍 请求房间信息: {room_id}")
+    
+    # 在所有游戏类型中查找房间
+    for game_type, game_rooms in rooms.items():
+        if room_id in game_rooms:
+            room = game_rooms[room_id]
+            print(f"✅ 找到房间: {room_id}，游戏类型: {game_type}")
+            
+            # 返回房间基本信息（不包含敏感信息）
+            return {
+                "room_id": room_id,
+                "game_type": game_type,
+                "owner": room.owner["name"] if room.owner else "未知",
+                "player_count": len(room.players),
+                "max_players": room.game.config["max_players"],
+                "status": room.status,
+                "name": room.name,
+                "exists": True
+            }
+    
+    print(f"❌ 房间不存在: {room_id}")
+    return {
+        "room_id": room_id,
+        "exists": False,
+        "error": "房间不存在"
+    }
