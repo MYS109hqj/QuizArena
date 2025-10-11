@@ -1,9 +1,9 @@
 import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
 import time
-from app.games.factory import GameFactory
+from .games.factory import GameFactory
 from .rooms import Room
-from app.models.player import Player
+from .models.player import Player
 import secrets
 import string
 

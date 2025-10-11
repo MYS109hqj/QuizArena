@@ -10,6 +10,7 @@
     <h2>房间：{{ store.room?.name || store.room?.room_id || '未知' }}</h2>
     <div>房主：{{ store.room?.owner?.name || '未知' }}</div>
     <div>最大人数：{{ store.room?.config?.max_players || '未知' }}</div>
+    <div>最小人数：{{ store.room?.config?.min_players || '未知' }}</div>
     <div>当前人数：{{ Object.keys(store.players).length || 0 }}</div>
     <div class="players">
       <div v-for="(p, key) in store.players" :key="key" class="player-card">
@@ -50,10 +51,41 @@
         <button @click="startGame" class="green-btn" :disabled="!allPlayersReady">
           开始游戏
         </button>
-        <button @click="modifySettings" class="green-btn">修改设置</button>
+        <button @click="showSettingsDialog = true" class="green-btn">修改设置</button>
       </div>
       
       <button @click="leaveRoom" class="green-btn">返回大厅</button>
+    </div>
+
+    <!-- 设置对话框 -->
+    <div v-if="showSettingsDialog" class="settings-dialog-overlay" @click.self="showSettingsDialog = false">
+      <div class="settings-dialog">
+        <h3>房间设置</h3>
+        <div class="setting-item">
+          <label>最小人数：</label>
+          <input 
+            type="number" 
+            v-model.number="settingsForm.minPlayers" 
+            min="1" 
+            max="10"
+            class="setting-input"
+          >
+        </div>
+        <div class="setting-item">
+          <label>最大人数：</label>
+          <input 
+            type="number" 
+            v-model.number="settingsForm.maxPlayers" 
+            min="1" 
+            max="10"
+            class="setting-input"
+          >
+        </div>
+        <div class="dialog-buttons">
+          <button @click="saveSettings" class="green-btn">保存</button>
+          <button @click="showSettingsDialog = false" class="cancel-btn">取消</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -79,6 +111,13 @@ const performanceMetrics = ref({
 
 const isPlaying = ref(false);
 
+// 设置对话框相关
+const showSettingsDialog = ref(false);
+const settingsForm = ref({
+  minPlayers: store.room?.config?.min_players || 2,
+  maxPlayers: store.room?.config?.max_players || 2
+});
+
 // 监听房间状态变化
 watch(
   () => store.gameStatus,
@@ -98,10 +137,10 @@ watch(
   { immediate: true }
 );
 
-// 监听房间信息加载完成
+// 监听房间信息加载完成和更新
 watch(
   () => store.room,
-  (newRoom) => {
+  (newRoom, oldRoom) => {
     if (newRoom && newRoom.room_id) {
       // 记录房间信息接收时间
       performanceMetrics.value.roomInfoReceived = Date.now();
@@ -121,6 +160,25 @@ watch(
         setTimeout(() => {
           isLoading.value = false;
         }, 500);
+      }
+      
+      // 更新设置表单
+      if (newRoom.config) {
+        const oldMinPlayers = oldRoom?.config?.min_players || 2;
+        const oldMaxPlayers = oldRoom?.config?.max_players || 2;
+        const newMinPlayers = newRoom.config.min_players || 2;
+        const newMaxPlayers = newRoom.config.max_players || 2;
+        
+        settingsForm.value.minPlayers = newMinPlayers;
+        settingsForm.value.maxPlayers = newMaxPlayers;
+        console.log(`🔄 设置表单已同步: min=${newMinPlayers}, max=${newMaxPlayers}`);
+        
+        // 如果设置发生了变化且设置对话框是打开的，自动关闭对话框
+        if (showSettingsDialog.value && 
+            (oldMinPlayers !== newMinPlayers || oldMaxPlayers !== newMaxPlayers)) {
+          console.log('✅ 设置已更新，自动关闭设置对话框');
+          showSettingsDialog.value = false;
+        }
       }
     }
   },
@@ -177,8 +235,37 @@ function startGame() {
   store.send({ type: 'start_game', roomId: store.room.room_id });
 }
 
-function modifySettings() {
-  // 修改设置逻辑
+function saveSettings() {
+  // 验证设置
+  if (settingsForm.value.minPlayers > settingsForm.value.maxPlayers) {
+    alert('最小人数不能大于最大人数');
+    return;
+  }
+  
+  if (settingsForm.value.minPlayers < 1) {
+    alert('最小人数不能小于1');
+    return;
+  }
+  
+  if (settingsForm.value.maxPlayers < 1) {
+    alert('最大人数不能小于1');
+    return;
+  }
+  
+  // 发送设置更新请求
+  console.log(`⏱️ 更新设置请求发送时间: ${Date.now()}`);
+  store.send({ 
+    type: 'update_settings', 
+    roomId: store.room.room_id,
+    settings: {
+      min_players: settingsForm.value.minPlayers,
+      max_players: settingsForm.value.maxPlayers
+    }
+  });
+  
+  // 不立即关闭对话框，等待后端响应
+  // 后端会在更新成功后广播room_state消息，前端会自动更新并关闭对话框
+  console.log('⏳ 等待后端设置更新响应...');
 }
 
 function leaveRoom() {
@@ -300,5 +387,85 @@ onBeforeRouteLeave((to, from, next) => {
   color: #856404;
   font-size: 1.1em;
   margin-bottom: 12px;
+}
+
+/* 设置对话框样式 */
+.settings-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  cursor: pointer;
+}
+
+.settings-dialog-overlay > * {
+  cursor: default;
+}
+
+.settings-dialog {
+  background: white;
+  padding: 24px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  min-width: 300px;
+  max-width: 400px;
+}
+
+.settings-dialog h3 {
+  margin: 0 0 16px 0;
+  color: #2c3e50;
+  text-align: center;
+}
+
+.setting-item {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setting-item label {
+  font-weight: 500;
+  color: #2c3e50;
+  min-width: 80px;
+}
+
+.setting-input {
+  width: 80px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.setting-input:focus {
+  outline: none;
+  border-color: #27ae60;
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.cancel-btn {
+  background: #95a5a6;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  background: #7f8c8d;
 }
 </style>

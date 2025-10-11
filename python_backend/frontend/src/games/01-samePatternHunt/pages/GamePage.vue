@@ -19,6 +19,42 @@
       </div>
     </div>
 
+    <!-- 终局页面 -->
+    <div v-if="showFinalState" class="final-state-overlay">
+      <div class="final-state-modal">
+        <div class="final-state-header">
+          <h2>终局页面</h2>
+          <button class="close-btn" @click="closeFinalState">×</button>
+        </div>
+        <div class="final-state-content">
+          <div class="final-patterns-section">
+            <h3 class="section-title">终局图案</h3>
+            <div class="final-cards-grid">
+              <div v-for="card in finalCards" :key="card.cardId" class="final-card">
+                <img 
+                  :src="getPatternImage(card.patternId)" 
+                  :alt="'图案 ' + card.patternId" 
+                  class="pattern-img"
+                />
+              </div>
+            </div>
+          </div>
+          <div class="final-scores">
+            <h3 class="section-title">最终得分</h3>
+            <div class="score-list">
+              <div v-for="player in rankedPlayers" :key="player.id" class="score-item">
+                <span class="player-name">{{ player.name }}</span>
+                <span class="player-score">{{ player.score }}分</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="final-state-actions">
+          <button @click="closeFinalState" class="green-btn">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <GameHeader class="game-header" @exit="handleExit" @showRules="showRulesModal = true" />
 
     <!-- 桌面宽屏时的侧边栏 -->
@@ -46,12 +82,12 @@
       <TargetDisplay />
     </div>
 
-    <GameOverModal :show="isGameFinished" :ranked-players="rankedPlayers" @leave="leaveGame" @playAgain="playAgain" />
+    <GameOverModal :show="isGameFinished" :ranked-players="rankedPlayers" @leave="leaveGame" @playAgain="playAgain" @viewFinalState="showFinalState = true" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore';
 import { hasPendingConnection, restoreConnection, connectSPHSocket, isWebSocketActive, setRouteChanging } from '@/ws/samePatternSocket';
@@ -63,6 +99,14 @@ import CardsGrid from '@/components/CardsGrid.vue';
 import GameOverModal from '@/components/GameOverModal.vue';
 import RulesSettings from '@/components/RulesSettings.vue';
 
+// 图片路径工具
+const getPatternImage = (patternId) => {
+  if (!patternId) {
+    return new URL('/assets/placeholder.svg', import.meta.url).href;
+  }
+  return new URL(`/assets/patterns/${patternId}.svg`, import.meta.url).href;
+};
+
 const store = useSamePatternHuntStore();
 const router = useRouter();
 const route = useRoute();
@@ -73,6 +117,10 @@ const reconnectStatus = ref('');
 
 // 规则设置模态框状态
 const showRulesModal = ref(false);
+
+// 终局页面状态
+const showFinalState = ref(false);
+const finalCards = ref([]);
 
 // 本地状态（仅保留 UI 控制）
 const isLocked = computed(() => {
@@ -125,6 +173,10 @@ const handleExit = () => {
   router.push({ name: 'SPHLobby' });
 };
 
+const closeFinalState = () => {
+  showFinalState.value = false;
+};
+
 
 
 
@@ -137,6 +189,32 @@ onMounted(async () => {
     setRouteChanging(false);
     sessionStorage.removeItem('SPH_ROUTE_CHANGING');
   }, 1000);
+
+  // 监听终局状态事件
+  const handleFinalState = (data) => {
+    console.log('🎯 收到终局状态事件:', data);
+    console.log('store.cards:', store.cards);
+    
+    // 确保使用store中已经更新好的cards数据
+    if (store.cards && store.cards.length > 0) {
+      finalCards.value = store.cards.map(card => ({
+        cardId: card.cardId,
+        patternId: card.patternId
+      }));
+      console.log('终局卡牌数据:', finalCards.value);
+      showFinalState.value = true;
+    } else {
+      console.error('store.cards为空或未定义');
+    }
+  };
+
+  // 监听store的finalState变化
+  watch(() => store.finalState, (newValue) => {
+    if (newValue && newValue.cards) {
+      console.log('🔍 检测到finalState变化:', newValue);
+      handleFinalState(newValue);
+    }
+  }, { deep: true });
 
   // 检查连接状态
   if (isWebSocketActive()) {
@@ -336,6 +414,148 @@ onUnmounted(() => {
   display: none;
 }
 
+/* 终局页面样式 */
+.final-state-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1003;
+  padding: 20px;
+}
+
+.final-state-modal {
+  background: white;
+  border-radius: 12px;
+  max-width: 900px;
+  width: 95%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.final-state-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.final-state-header h2 {
+  margin: 0;
+  color: #2c3e50;
+}
+
+.final-state-content {
+  padding: 20px;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 30px;
+}
+
+.final-patterns-section {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.section-title {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 16px;
+  font-weight: 600;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #3498db;
+}
+
+.final-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: 8px;
+  width: 100%;
+  height: 400px;
+  max-height: 400px;
+}
+
+.final-card {
+  background: white;
+  border: 2px solid #dee2e6;
+  border-radius: 8px;
+  padding: 4px;
+  text-align: center;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.final-card:hover {
+  border-color: #3498db;
+  box-shadow: 0 4px 8px rgba(52, 152, 219, 0.2);
+  transform: translateY(-2px);
+}
+
+.pattern-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.final-scores {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.final-scores h3 {
+  margin: 0 0 12px 0;
+  color: #2c3e50;
+  font-size: 16px;
+}
+
+.score-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.score-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.player-name {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.player-score {
+  color: #27ae60;
+  font-weight: bold;
+}
+
+.final-state-actions {
+  padding: 20px;
+  border-top: 1px solid #eee;
+  text-align: center;
+}
+
 /* 宽屏布局 - 宽高比大于1.5且宽度大于1024px时显示侧边栏和目标栏 */
 @media (min-aspect-ratio: 3/2) and (min-width: 1024px) {
   .game-bg {
@@ -438,6 +658,28 @@ onUnmounted(() => {
   .game-main {
     /* 移除padding-top设置，保持默认间距 */
   }
+
+  /* 移动端终局页面适配 - 保持4×4布局 */
+  .final-state-content {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+
+  .final-patterns-section {
+    order: 2;
+  }
+
+  .final-scores {
+    order: 1;
+  }
+
+  .final-cards-grid {
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    height: 350px;
+    max-height: 350px;
+    gap: 6px;
+  }
 }
 
 /* 超小屏幕优化 */
@@ -452,6 +694,14 @@ onUnmounted(() => {
 
   .game-main {
     gap: 16px;
+  }
+
+  .final-cards-grid {
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    height: 300px;
+    max-height: 300px;
+    gap: 4px;
   }
 }
 

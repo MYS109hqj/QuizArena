@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, override
 from fastapi import WebSocket
 from .base import BaseGame
 from app.models.player import Player
@@ -80,3 +80,8 @@ class RoundBaseGame(BaseGame):
             "round": self.round,
             "total_rounds": self.total_rounds
         })
+
+    @override
+    async def update_rules(self, rules: Dict[str, Any]) -> None:
+        """更新游戏规则"""
+        return None

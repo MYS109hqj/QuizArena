@@ -1,15 +1,15 @@
 from __future__ import annotations
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Any
 from fastapi import WebSocket
-from app.games.base import BaseGame
-from app.models.player import Player
+from .games.base import BaseGame
+from .models.player import Player
 
 class Room:
-    def __init__(self, room_id: str, game: BaseGame, owner_info: Dict = None, name: str = ""):
+    def __init__(self, room_id: str, game: BaseGame, owner_info: Optional[Dict[str, Any]] = None, name: str = ""):
         self.room_id = room_id
         self.game = game
         self.reconnect_timeout = 30  # 增加到30秒，为玩家重连提供充足时间
-        self.owner = owner_info if owner_info and "id" in owner_info and "name" in owner_info else None
+        self.owner: Optional[Dict[str, Any]] = owner_info if owner_info and "id" in owner_info and "name" in owner_info else None
         self.name = name or room_id
         self.status = "waiting"  # waiting, playing, ended
         
@@ -20,7 +20,7 @@ class Room:
         self.players: Dict[str, Player] = {}  # 玩家ID -> Player对象
         self.connections: Dict[WebSocket, str] = {}  # 连接 -> 玩家ID
         
-        self._on_empty_callback: Optional[Callable] = None
+        self._on_empty_callback: Optional[Callable[[Room], Any]] = None
         
         # 设置游戏对房间的引用
         self.game.set_room_reference(self)
@@ -83,18 +83,29 @@ class Room:
         elif self.status == "playing":
             # 转发游戏内消息给游戏实例处理
             await self.game.handle_event(websocket, message, player_id)
+        
+        # 处理设置更新请求（在任何状态下都可以处理）
+        if message_type == "update_settings":
+            if "settings" in message:
+                result = await self.update_settings(player_id, message["settings"])
+                await websocket.send_json(result)
 
     def can_start_game(self) -> bool:
-        """检查是否可以开始游戏：所有非房主玩家都已准备且满足最小玩家数"""
+        """检查是否可以开始游戏：满足最小玩家数且所有非房主玩家都已准备"""
         if not self.owner:
+            return False
+            
+        # 检查是否有足够的玩家
+        min_players = self.game.config.get("min_players", 2)
+        if len(self.players) < min_players:
             return False
             
         # 获取所有非房主玩家
         non_owner_players = [p_id for p_id in self.players.keys() if p_id != self.owner["id"]]
         
-        # 检查是否有足够的玩家
-        if len(self.players) < self.game.config.get("min_players", 2):
-            return False
+        # 如果没有其他玩家（单人游戏），直接返回True
+        if len(non_owner_players) == 0:
+            return True
             
         # 检查所有非房主玩家是否都已准备
         return all(p_id in self.ready_players for p_id in non_owner_players)
@@ -191,11 +202,35 @@ class Room:
         """检查玩家是否有权限修改设置（仅限房主）"""
         return self.owner and self.owner["id"] == player_id
 
-    async def update_settings(self, player_id: str, settings: Dict):
+    async def update_settings(self, player_id: str, settings: Dict[str, Any]) -> Dict[str, Any]:
         """更新游戏设置"""
         if not self.can_modify_settings(player_id):
             return {"error": "无权限，只有房主可以修改设置"}
 
+        # 验证设置
+        if "min_players" in settings:
+            min_players = settings["min_players"]
+            if min_players < 1:
+                return {"error": "最小人数不能小于1"}
+            if "max_players" in settings:
+                max_players = settings["max_players"]
+                if min_players > max_players:
+                    return {"error": "最小人数不能大于最大人数"}
+            elif min_players > self.game.config.get("max_players", 2):
+                return {"error": "最小人数不能大于当前最大人数"}
+
+        if "max_players" in settings:
+            max_players = settings["max_players"]
+            if max_players < 1:
+                return {"error": "最大人数不能小于1"}
+            if "min_players" in settings:
+                min_players = settings["min_players"]
+                if max_players < min_players:
+                    return {"error": "最大人数不能小于最小人数"}
+            elif max_players < self.game.config.get("min_players", 2):
+                return {"error": "最大人数不能小于当前最小人数"}
+
+        # 应用设置
         if "rules" in settings:
             await self.game.update_rules(settings["rules"])
         if "max_players" in settings:
@@ -203,8 +238,8 @@ class Room:
         if "min_players" in settings:
             self.game.config["min_players"] = settings["min_players"]
             
-        await self.broadcast_state({"message": "游戏设置已更新"})
-        return {"success": True}
+        await self.broadcast_state()
+        return {"success": True, "message": "游戏设置已更新"}
 
     async def end_game(self):
         """结束当前游戏"""
@@ -216,10 +251,7 @@ class Room:
     async def reset_game(self):
         """重置游戏，回到等待状态"""
         if self.status == "ended":
-            # 调用游戏的重置方法（如果有）
-            if hasattr(self.game, 'reset_game'):
-                await self.game.reset_game()
-            
+            # 重置游戏状态
             self.status = "waiting"
             # 重置准备状态，房主仍然保持准备
             self.ready_players = {self.owner["id"]} if self.owner else set()

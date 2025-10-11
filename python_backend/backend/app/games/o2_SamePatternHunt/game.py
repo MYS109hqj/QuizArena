@@ -43,6 +43,12 @@ class o2SPHGame(RoundBaseGame):
             await self.update_rules(event)
             return
             
+        # 处理观看终局页面请求
+        if event.get("type") == "view_final_state":
+            print("view_final_state处理观看终局页面请求")
+            await self.send_final_state(player_id)
+            return
+            
         action = event.get("action")
         await self.process_action(player_id, action)
 
@@ -249,6 +255,27 @@ class o2SPHGame(RoundBaseGame):
         else:
             # 继续游戏，轮次已在process_action里处理
             pass
+
+    async def send_final_state(self, player_id: str):
+        """发送终局状态数据给指定玩家"""
+        if self.state != "finished":
+            await self.broadcast_to_player(player_id, {
+                "type": "error",
+                "message": "游戏尚未结束，无法查看终局页面"
+            })
+            return
+            
+        # 构建终局数据：所有卡牌的图案信息
+        final_state = {
+            "type": "final_state",
+            "cards": self.cards,  # 包含所有卡牌的patternId信息
+            "scores": self.scores,
+            "player_targets": self.player_targets,
+            "player_target_index": self.player_target_index
+        }
+        
+        print(f"📤 发送终局状态给玩家 {player_id}: {final_state}")
+        await self.broadcast_to_player(player_id, final_state)
 
     def _get_player_flipping_card(self, card_id: str) -> str:
         """获取正在翻转某张卡片的玩家ID"""

@@ -11,6 +11,7 @@
         </div>
       </div>
       <div class="button-group">
+        <button @click="onViewFinalState" class="blue-btn">观看终局页面</button>
         <button @click="onPlayAgain" class="green-btn">再来一局</button>
         <button @click="onLeave" class="gray-btn">返回大厅</button>
       </div>
@@ -20,13 +21,16 @@
 
 <script setup>
 import { defineProps, defineEmits } from 'vue';
+import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore';
 
 defineProps({
   show: Boolean,
   rankedPlayers: { type: Array, default: () => [] }
 });
 
-const emit = defineEmits(['leave', 'playAgain']);
+const emit = defineEmits(['leave', 'playAgain', 'viewFinalState']);
+
+const store = useSamePatternHuntStore();
 
 const onPlayAgain = () => {
   emit('playAgain');
@@ -36,6 +40,15 @@ const onLeave = () => {
   if (confirm('确定要退出游戏吗？')) {
     emit('leave');
   }
+};
+
+const onViewFinalState = () => {
+  // 发送观看终局页面请求
+  console.log("GameOverModal:trigger onViewFinalState")
+  if (store) {
+    store.send({ type: 'view_final_state' });
+  }
+  emit('viewFinalState');
 };
 
 const medalEmoji = (index) => {
@@ -95,6 +108,22 @@ const medalEmoji = (index) => {
   transition: background 0.3s;
 }
 
+.blue-btn {
+  background: #3498db;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 8px rgba(52, 152, 219, 0.5);
+  cursor: pointer;
+  font-size: 1em;
+  transition: background 0.3s;
+}
+
+.blue-btn:hover {
+  background: #2980b9;
+}
+
 .button-group {
   display: flex;
   gap: 12px;
@@ -131,5 +160,21 @@ const medalEmoji = (index) => {
 
 .gray-btn:hover {
   background: #7f8c8d;
+}
+
+.close-btn {
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 8px rgba(231, 76, 60, 0.5);
+  cursor: pointer;
+  font-size: 1em;
+  transition: background 0.3s;
+}
+
+.close-btn:hover {
+  background: #c0392b;
 }
 </style>
