@@ -73,8 +73,10 @@ class Room:
             # 处理开始游戏请求（只有房主可以发起）
             elif message_type == "start_game" and player_id == self.owner["id"]:
                 if self.can_start_game():
-
-                    await self.start_game()
+                    if len(self.players) == 1:
+                        await self.start_game(mode="single")
+                    else:
+                        await self.start_game(mode="multi")
                 else:
                     await self.broadcast_state(
                         extra_message={"error": "无法开始游戏，还有玩家未准备或玩家数量不足"}
@@ -110,11 +112,11 @@ class Room:
         # 检查所有非房主玩家是否都已准备
         return all(p_id in self.ready_players for p_id in non_owner_players)
 
-    async def start_game(self):
+    async def start_game(self,mode:str):
         """开始游戏"""
         self.status = "playing"
         await self.broadcast_state()
-        await self.game.start_game()  # 通知游戏开始
+        await self.game.start_game(mode=mode)  # 通知游戏开始
         
 
     async def disconnect(self, websocket: WebSocket):

@@ -1,0 +1,46 @@
+# 解决MySQL数据库不存在的问题
+
+您遇到了以下错误：
+```
+sqlalchemy.exc.OperationalError: (pymysql.err.OperationalError) (1049, "Unknown database 'quizarena'")
+```
+
+这表示MySQL服务器上不存在名为'quizarena'的数据库。请按照以下步骤解决：
+
+## 解决步骤
+
+1. **确保MySQL服务正在运行**
+   - Windows：打开服务管理器，检查MySQL服务状态是否为"正在运行"
+   - macOS/Linux：使用命令 `sudo service mysql start` 或 `sudo systemctl start mysql`
+
+2. **创建数据库**
+   方法一：通过MySQL命令行创建
+   - 打开命令提示符(CMD)或终端
+   - 输入命令：`mysql -u root -p` （如果您的MySQL用户名不是root，请替换为实际用户名）
+   - 输入MySQL密码
+   - 在MySQL提示符下执行以下命令：
+     ```sql
+     CREATE DATABASE IF NOT EXISTS quizarena DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+     USE quizarena;
+     ```
+
+   方法二：直接运行初始化脚本
+   - 打开命令提示符(CMD)
+   - 执行以下命令（注意路径中的空格）：
+     ```
+     mysql -u root -p < "e:\Project_storage\blog_updated\QuizArena_latest\python_backend\backend\init_mysql.sql"
+     ```
+   - 输入MySQL密码
+
+3. **验证数据库是否创建成功**
+   - 登录MySQL：`mysql -u root -p`
+   - 执行命令：`SHOW DATABASES;` 检查是否包含quizarena
+   - 执行命令：`USE quizarena;` 然后 `SHOW TABLES;` 检查是否创建了所有表
+
+4. **确保.env文件中的配置正确**
+   检查e:\Project_storage\blog_updated\QuizArena_latest\python_backend\backend\.env文件中的MySQL配置是否正确，特别是：
+   - MYSQL_USER：MySQL用户名
+   - MYSQL_PASSWORD：MySQL密码
+   - MYSQL_DB：应设置为"quizarena"
+
+完成这些步骤后，您的应用程序应该能够成功连接到MySQL数据库了。

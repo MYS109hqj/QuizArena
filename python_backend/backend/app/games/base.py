@@ -15,7 +15,7 @@ class BaseGame(ABC):
         self.mode: str = "none"  # 游戏模式
         self.config: Dict[str, Any] = {
             "max_players": 2,
-            "min_players": 2  # 新增最小玩家数配置
+            "min_players": 1  # 新增最小玩家数配置
         }
         self.state: str = "waiting"  # 游戏状态：waiting/playing/finished
         self.room: Optional["Room"] = None  # 关联的房间引用

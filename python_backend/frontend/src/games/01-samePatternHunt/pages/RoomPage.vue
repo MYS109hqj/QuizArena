@@ -14,7 +14,10 @@
     <div>当前人数：{{ Object.keys(store.players).length || 0 }}</div>
     <div class="players">
       <div v-for="(p, key) in store.players" :key="key" class="player-card">
-        <img :src="p.avatar" class="avatar" :alt="p.name" />
+        <div class="avatar-container">
+          <img v-if="p.avatar" :src="p.avatar" class="avatar-image" :alt="p.name" />
+          <div v-else class="avatar-placeholder">{{ p.name?.charAt(0)?.toUpperCase() || 'P' }}</div>
+        </div>
         <span>{{ p.name }}</span>
         <span v-if="key === store.room?.owner?.id">房主</span>
         <span v-else>玩家</span>
@@ -54,6 +57,7 @@
         <button @click="showSettingsDialog = true" class="green-btn">修改设置</button>
       </div>
       
+      <button @click="showRules = true" class="green-btn">查看规则</button>
       <button @click="leaveRoom" class="green-btn">返回大厅</button>
     </div>
 
@@ -87,6 +91,26 @@
         </div>
       </div>
     </div>
+    
+    <!-- 游戏规则模态框 -->
+    <div v-if="showRules" class="rules-dialog-overlay" @click.self="showRules = false">
+      <div class="rules-dialog">
+        <h2>游戏规则</h2>
+        <div class="rules-content">
+          <p>Same Pattern Hunt(寻找相同图案)是一款记忆类游戏。</p>
+          <p>每位玩家都会有一个"目标图案"。在玩家的轮次中，可以翻开一个板块：翻到"目标图案"得1分，翻到错误图案扣1分。无论如何，板块都会翻回。</p>
+          <ul>
+            <li>如果玩家翻出了自己的"目标图案"，系统会派发一个新的"目标图案"，玩家可以（且必须）继续轮次；</li>
+            <li>如果玩家翻出的不是自己的"目标图案"，则玩家轮次结束，进入下一个玩家的轮次，"目标图案"不会更新；</li>
+            <li>如果有玩家的积分达到20分 or 积分被扣到0分，游戏就会立即结束（没有公平轮），由即时的积分结算名次；</li>
+            <li>如果有玩家翻出了自己的第32个目标图案（极端情况），游戏也会立即结束，同上栏的规则结算；</li>
+          </ul>
+        </div>
+        <div class="dialog-buttons">
+          <button @click="showRules = false" class="green-btn">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -94,9 +118,11 @@
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
 import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore';
-import { setRouteChanging } from '@/ws/samePatternSocket';
+import { useUserStore } from '@/stores/userStore';
+import { setRouteChanging, restoreConnection } from '@/ws/samePatternSocket';
 
 const store = useSamePatternHuntStore();
+const userStore = useUserStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -113,6 +139,7 @@ const isPlaying = ref(false);
 
 // 设置对话框相关
 const showSettingsDialog = ref(false);
+const showRules = ref(false); // 控制规则模态框显示
 const settingsForm = ref({
   minPlayers: store.room?.config?.min_players || 2,
   maxPlayers: store.room?.config?.max_players || 2
@@ -186,29 +213,85 @@ watch(
 );
 
 // 确保在组件加载时尝试加入房间
-onMounted(() => {
-  // 记录连接开始时间
-  performanceMetrics.value.connectionStart = Date.now();
-  loadingDetails.value = '正在连接服务器...';
-  
-  if (!store.room || store.room.room_id !== route.params.roomId) {
-    console.log(`🚀 开始加入房间: ${route.params.roomId}`);
-    loadingDetails.value = '正在发送加入房间请求...';
+onMounted(async () => {
+  try {
+    // 1. 初始化samePatternHuntStore，确保用户数据正确同步
+    store.initStore();
     
-    store.send({ type: 'join_room', roomId: route.params.roomId });
+    // 2. 检查userStore是否已加载，如果未加载则等待
+    if (!userStore.isLoggedIn && !userStore.userInfo?.player_id) {
+      console.log('👤 等待用户数据加载...');
+      await new Promise(resolve => {
+        const checkInterval = setInterval(() => {
+          if (userStore.userInfo?.player_id) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+        // 设置超时，避免无限等待
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          resolve();
+        }, 3000);
+      });
+    }
     
-    // 设置超时检查
-    setTimeout(() => {
-      if (isLoading.value && !store.room?.room_id) {
-        loadingDetails.value = '连接超时，正在重试...';
-        console.warn('房间连接超时，尝试重新连接');
-        store.send({ type: 'join_room', roomId: route.params.roomId });
-      }
-    }, 5000);
-  } else {
-    // 如果已经有房间信息，直接完成加载
-    isLoading.value = false;
-    performanceMetrics.value.totalTime = 0;
+    // 3. 再次同步用户数据，确保最新
+    store.syncUserData();
+    
+    // 检查登录状态
+    if (!userStore.isLoggedIn) {
+      console.log('🔐 用户未登录，重定向到登录页面');
+      router.push('/login');
+      return;
+    }
+    
+    // 记录连接开始时间
+    performanceMetrics.value.connectionStart = Date.now();
+    loadingDetails.value = '正在连接服务器...';
+    
+    // 检查是否存在待恢复的连接
+    const hasPendingConnection = localStorage.getItem('SPH_LAST_CONNECTION') !== null;
+    
+    if (hasPendingConnection) {
+      console.log('🔄 检测到待恢复的连接，尝试恢复...');
+      loadingDetails.value = '正在恢复连接...';
+      
+      // 直接调用restoreConnection尝试恢复连接
+      const connectionRestored = restoreConnection((data) => {
+        store.handleMessage(data);
+      });
+      
+      // 设置超时检查，如果连接未能及时恢复，则尝试重新加入房间
+      setTimeout(() => {
+        if (isLoading.value && !store.room?.room_id) {
+          console.warn('连接恢复失败，尝试重新加入房间');
+          loadingDetails.value = '连接恢复失败，正在尝试重新连接...';
+          store.joinRoom(route.params.roomId);
+        }
+      }, 3000);
+    } else if (!store.room || store.room.room_id !== route.params.roomId) {
+      console.log(`🚀 开始加入房间: ${route.params.roomId}`);
+      loadingDetails.value = '正在发送加入房间请求...';
+      
+      store.joinRoom(route.params.roomId);
+      
+      // 设置超时检查
+      setTimeout(() => {
+        if (isLoading.value && !store.room?.room_id) {
+          loadingDetails.value = '连接超时，正在重试...';
+          console.warn('房间连接超时，尝试重新连接');
+          store.joinRoom(route.params.roomId);
+        }
+      }, 5000);
+    } else {
+      // 如果已经有房间信息，直接完成加载
+      isLoading.value = false;
+      performanceMetrics.value.totalTime = 0;
+    }
+  } catch (error) {
+    console.error('❌ 房间加载失败:', error);
+    router.push({ name: 'SPHLobby' });
   }
 });
 
@@ -286,7 +369,19 @@ function goToGamePage() {
 
 // 监听页面可见性变化（刷新/关闭）
 const handlePageUnload = () => {
-  // store.disconnect();
+  // 在页面刷新/关闭前保存连接信息
+  if (store.room && store.room.room_id && !isRouteChange) {
+    const connectionInfo = {
+      roomId: store.room.room_id,
+      player_info: {
+        id: store.player_id,
+        name: store.player_name,
+        avatar: store.avatarUrl
+      },
+      gameType: 'o2SPH'
+    };
+    localStorage.setItem('SPH_LAST_CONNECTION', JSON.stringify(connectionInfo));
+  }
 };
 
 onUnmounted(() => {
@@ -366,7 +461,37 @@ onBeforeRouteLeave((to, from, next) => {
 
 .players { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 20px; }
 .player-card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px #b2f7b2; display: flex; align-items: center; gap: 8px; }
-.avatar { width: 40px; height: 40px; border-radius: 50%; border: 2px solid #27ae60; }
+.avatar-container {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 2px solid #27ae60;
+}
+
+.avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #27ae60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: white;
+  border: 2px solid #27ae60;
+}
 .status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 6px; }
 .online { background: #27ae60; }
 .offline { background: #bbb; }
@@ -389,8 +514,9 @@ onBeforeRouteLeave((to, from, next) => {
   margin-bottom: 12px;
 }
 
-/* 设置对话框样式 */
-.settings-dialog-overlay {
+/* 设置对话框和规则模态框通用样式 */
+.settings-dialog-overlay,
+.rules-dialog-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -404,7 +530,8 @@ onBeforeRouteLeave((to, from, next) => {
   cursor: pointer;
 }
 
-.settings-dialog-overlay > * {
+.settings-dialog-overlay > *,
+.rules-dialog-overlay > * {
   cursor: default;
 }
 
@@ -415,6 +542,46 @@ onBeforeRouteLeave((to, from, next) => {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   min-width: 300px;
   max-width: 400px;
+}
+
+/* 规则模态框样式 */
+.rules-dialog {
+  background: white;
+  padding: 30px;
+  border-radius: 16px;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.2);
+  min-width: 400px;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.rules-dialog h2 {
+  text-align: center;
+  color: #2c3e50;
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.rules-content {
+  color: #34495e;
+  line-height: 1.6;
+}
+
+.rules-content p {
+  margin-bottom: 16px;
+  text-indent: 2em;
+}
+
+.rules-content ul {
+  margin-bottom: 20px;
+}
+
+.rules-content li {
+  margin-bottom: 12px;
+  padding-left: 8px;
 }
 
 .settings-dialog h3 {
