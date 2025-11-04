@@ -12,7 +12,7 @@
       </ul>
       <div>统计信息：{{ store.gameResult.stats }}</div>
     </div>
-    <button @click="restartGame" class="green-btn">再来一局</button>
+    <!-- <button @click="restartGame" class="green-btn">再来一局</button> -->
     <button @click="backToLobby" class="green-btn">返回首页</button>
   </div>
 </template>
@@ -32,6 +32,20 @@ function backToLobby() {
 </script>
 
 <style scoped>
-.result-bg { background: #e6ffe6; min-height: 100vh; padding: 40px; }
-.green-btn { background: #27ae60; color: #fff; border: none; margin: 10px; padding: 10px 20px; border-radius: 8px; box-shadow: 0 0 8px #27ae60; cursor: pointer; }
+.result-bg {
+  background: #e6ffe6;
+  min-height: 100vh;
+  padding: 40px;
+}
+
+.green-btn {
+  background: #27ae60;
+  color: #fff;
+  border: none;
+  margin: 10px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 8px #27ae60;
+  cursor: pointer;
+}
 </style>
