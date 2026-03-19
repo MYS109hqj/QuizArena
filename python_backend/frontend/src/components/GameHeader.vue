@@ -5,7 +5,7 @@
     </button>
     
     <span>房间ID：{{ store.room_id }}</span>
-    <span>当前轮次：{{ store.gameState?.round }}</span>
+    <span v-if="store.gameState?.round !== undefined">当前轮次：{{ store.gameState.round }}</span>
     <span v-if="isMyTurn" class="turn-indicator">轮到你了！</span>
     <span v-else-if="store?.gameState?.current_player" class="turn-indicator">
         {{ currentPlayerName }}的回合
@@ -20,10 +20,18 @@
 <script setup>
 import { computed } from 'vue';
 import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore';
+import { useMemorialBanquetStore } from '@/stores/memorialBanquetStore';
 
-const store = useSamePatternHuntStore();
+const props = defineProps({
+  store: {
+    type: Object,
+    required: true
+  }
+});
 
-const isMyTurn = computed(() => store.gameState.current_player === store.player_id);
+const store = props.store;
+
+const isMyTurn = computed(() => store.gameState?.current_player === store.player_id);
 const currentPlayerName = computed(() => {
   const playerId = store.gameState?.current_player;
   return store.players[playerId]?.name || '未知玩家';

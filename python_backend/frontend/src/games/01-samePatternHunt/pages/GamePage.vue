@@ -55,7 +55,7 @@
       </div>
     </div>
 
-    <GameHeader class="game-header" @exit="handleExit" @showRules="showRulesModal = true" />
+    <GameHeader :store="store" class="game-header" @exit="handleExit" @showRules="showRulesModal = true" />
 
     <!-- 桌面宽屏时的侧边栏 -->
     <div class="player-sidebar">

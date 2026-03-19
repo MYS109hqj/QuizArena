@@ -52,7 +52,10 @@ class QuizGame(BaseGame):
             await self._handle_set_expose_answer(event)
         elif event_type == "congratulations":
             await self._handle_congratulations()
-            
+    async def on_player_join(self, player: Player) -> None:
+        """玩家加入时的回调（可在子类中重写）"""
+        print(player)
+        # quiz的玩家加入并没有被处理
 
     async def _handle_sync_time(self, websocket: WebSocket, event: Dict[str, Any]) -> None:
         # 1. 获取服务器当前毫秒级时间（time.time() 返回秒级，*1000 转为毫秒）

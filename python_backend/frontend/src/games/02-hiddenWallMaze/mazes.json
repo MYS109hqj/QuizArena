@@ -1,0 +1,52 @@
+{
+  "1": {
+    "compressed": "8e3f492372f26b2b924294d0d2dd26069269696496964f24f42f60bff962996b964d4f44c0",
+    "path_length": 13,
+    "rows": 8
+  },
+  "2": {
+    "compressed": "8e3f4903f62f62bfb0624db9969bf444b40f22f0bd60d60dff4b24bffb09696b94d64f44c0",
+    "path_length": 15,
+    "rows": 8
+  },
+  "3": {
+    "compressed": "8e3f510476bb6222f0420ddb92ddb29492f04960964bdf0dff06b0bfb9690db0964df44dc0",
+    "path_length": 17,
+    "rows": 8
+  },
+  "4": {
+    "compressed": "8e3f4923fbbf26bf94206db9b492f044b04f0f24962964f0f096b60bd964b0db96f44f44c0",
+    "path_length": 15,
+    "rows": 8
+  },
+  "5": {
+    "compressed": "8e3f492372fb22b692499960d694d696b0f2b064960946f0f4966b46b92b06b094d4f44dc0",
+    "path_length": 13,
+    "rows": 8
+  },
+  "6": {
+    "compressed": "8e3f51037bbffbb694bf0460f060f29692d29960960d4f0df42fb42bf960b0db964d4f44c0",
+    "path_length": 13,
+    "rows": 8
+  },
+  "7": {
+    "compressed": "8e3f4904f6226bb6bd9f0469b4bd2690f0f0f04fd60fd66bf06b26969b49b0f096d4d64dc0",
+    "path_length": 19,
+    "rows": 8
+  },
+  "8": {
+    "compressed": "8e3f4143fb2b26b69990f92490d690f0db24964bd469669fff4b24bff24969bf96d64d64c0",
+    "path_length": 15,
+    "rows": 8
+  },
+  "9": {
+    "compressed": "8e3f5903fb26626b94bf0699b4b9bd90f4046d46bd62ff24f60f24bfb960b0f0964dd64dc0",
+    "path_length": 15,
+    "rows": 8
+  },
+  "10": {
+    "compressed": "8e3f49237bb26bb6990b906994949694b4296924f0d64d669bfffb24922b40fd9dd64ffdc0",
+    "path_length": 13,
+    "rows": 8
+  }
+}

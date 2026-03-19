@@ -2,6 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from .models.user import Base as UserBase
 from .models.game_record import Base as GameRecordBase
+from .models.achievement import Base as AchievementBase
+from .models.user_achievement import Base as UserAchievementBase
 import os
 from dotenv import load_dotenv
 
@@ -44,6 +46,13 @@ def create_tables():
         # 创建游戏记录相关表
         GameRecordBase.metadata.create_all(bind=engine)
         print("游戏记录表创建成功")
+        
+        # 创建成就相关表
+        AchievementBase.metadata.create_all(bind=engine)
+        print("成就定义表创建成功")
+        
+        UserAchievementBase.metadata.create_all(bind=engine)
+        print("用户成就进度表创建成功")
         
         print("所有数据库表创建完成")
     except Exception as e:

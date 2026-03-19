@@ -11,21 +11,24 @@ import httpx
 from datetime import datetime
 from app.database import get_db
 from app.models.user import User
+from .observers import SPHGameObserver
 
 class o2SPHGame(RoundBaseGame):
     def __init__(self, room_id: str):
         super().__init__(room_id)
-        self.cards: Dict[str, Dict] = {}  # cardId -> {patternId, imgUrl}
-        self.player_targets: Dict[str, List[str]] = {}  # playerId -> 48个目标patternId序列
-        self.player_target_index: Dict[str, int] = {}   # playerId -> 当前目标序列索引
-        self.scores: Dict[str, int] = {}  # playerId -> score
+        self.scores: Dict[str, int] = {}  # playerId -> score 可以移到RoundBaseGame？
         self.locked: bool = False
         self.config: Dict[str, Any] = {
             "max_players": 2,
             "min_players": 1  # 新增最小玩家数配置
         }
+        self.cards: Dict[str, Dict] = {}  # cardId -> {patternId, imgUrl}
+        self.player_targets: Dict[str, List[str]] = {}  # playerId -> 48个目标patternId序列
+        self.player_target_index: Dict[str, int] = {}   # playerId -> 当前目标序列索引
+
+        # 初始化成就观察者
+        self.achievement_observer = SPHGameObserver(self)
         
-        # 规则配置
         self.game_rules = {
             "allowSimultaneousActions": True,
             "flipRestrictions": {
@@ -373,7 +376,18 @@ class o2SPHGame(RoundBaseGame):
                 print(f"✓ 游戏记录直接创建成功: 玩家 {player_id}, 用户ID {player_id}, 得分 {score}, 会话ID: {session_id}")
                 
                 # 更新玩家统计信息
-                await self.update_player_stats_direct(player_id, "same_pattern_hunt", score, accuracy_decimal, game_duration)
+                total_games = await self.update_player_stats_direct(player_id, "same_pattern_hunt", score, accuracy_decimal, game_duration)
+                
+                # 胜利暂时定义为得分>0
+                is_winner = score > 0
+                
+                # 通知观察者游戏结束
+                game_data = {
+                    'user_id': player_id,
+                    'is_winner': is_winner,
+                    'total_games': total_games
+                }
+                await self.achievement_observer.on_game_finished(game_data)
                 
             except Exception as db_error:
                 if db:
@@ -402,8 +416,9 @@ class o2SPHGame(RoundBaseGame):
             return None
     
     async def update_player_stats_direct(self, user_id: int, game_type: str, score: int, accuracy: float, duration: int):
-        """直接更新玩家统计信息"""
+        """更新玩家统计信息并返回总游戏数"""
         print(f"开始更新玩家统计: 用户ID {user_id}, 游戏类型 {game_type}, 最新得分 {score}, 最新准确率 {accuracy:.2f}%")
+        total_games = 0
         try:
             from app.database import get_db
             from app.models.game_record import PlayerStats, GameSession
@@ -419,6 +434,12 @@ class o2SPHGame(RoundBaseGame):
                 # 获取数据库会话
                 db = next(get_db())
                 print("统计更新: 数据库会话获取成功")
+                
+                total_games = db.query(func.count(GameSession.id)).filter(
+                    GameSession.user_id == user_id,
+                    GameSession.game_type == game_type
+                ).scalar() or 0
+                print(f"用户 {user_id} 的总游戏数: {total_games}")
                 
                 # 查询现有统计信息
                 print(f"尝试查找现有统计记录: 用户ID={user_id}, 游戏类型={game_type}")
@@ -515,6 +536,7 @@ class o2SPHGame(RoundBaseGame):
             print(f"❌ 更新玩家统计失败(外层异常): {str(e)}")
             import traceback
             print(traceback.format_exc())
+        return total_games
 
 
     async def send_final_state(self, player_id: str):

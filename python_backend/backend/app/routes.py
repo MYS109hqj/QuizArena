@@ -52,7 +52,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, game_type: str)
             rooms[game_type] = {}
         if room_id not in rooms[game_type]:
             game = GameFactory.create_game(game_type, room_id)
-            room = Room(room_id, game)
+            room = Room(room_id, game,gameType=game_type)
             # 注册销毁房间的回调函数
             destroy_cb = await create_room_destroy_callback(game_type)
             room.on_empty(destroy_cb)

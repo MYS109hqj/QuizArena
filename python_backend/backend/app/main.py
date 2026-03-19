@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from .routes import router as websocket_router  # 使用相对导入
 from .auth_routes import router as auth_router  # 新增认证路由
 from .game_record_routes import router as game_record_router  # 新增游戏记录路由
+from .achievement_routes import router as achievement_router  # 新增成就路由
 from fastapi.middleware.cors import CORSMiddleware
 from .database import create_tables  # 新增数据库初始化
 import os
@@ -33,6 +34,7 @@ app.add_middleware(
 app.include_router(websocket_router)
 app.include_router(auth_router)
 app.include_router(game_record_router)
+app.include_router(achievement_router)
 
 if __name__ == "__main__":
     import uvicorn

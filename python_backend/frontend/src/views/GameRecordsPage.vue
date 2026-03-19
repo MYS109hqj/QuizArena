@@ -3,81 +3,139 @@
     <!-- Header -->
     <div class="page-header">
       <button class="back-button" @click="goBack">← 返回</button>
-      <h1>游戏记录</h1>
-      <p>查看您的游戏历史和统计信息</p>
+      <h1>游戏记录与成就</h1>
     </div>
 
-    <!-- 统计概览 -->
-    <div class="stats-overview">
-      <div class="stat-card">
-        <div class="stat-value">{{ totalGames }}</div>
-        <div class="stat-label">总游戏次数</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ averageScore.toFixed(1) }}</div>
-        <div class="stat-label">平均得分</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ bestScore }}</div>
-        <div class="stat-label">最高得分</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ averageAccuracy.toFixed(1) }}%</div>
-        <div class="stat-label">平均准确率</div>
-      </div>
-    </div>
-
-    <!-- 游戏类型筛选 -->
-    <div class="game-filter">
-      <select v-model="selectedGameType" @change="loadGameRecords">
-        <option value="">所有游戏</option>
-        <option value="same_pattern_hunt">相同图案狩猎</option>
-        <!-- 可以添加更多游戏类型 -->
-      </select>
-    </div>
-
-    <!-- 游戏记录列表 -->
-    <div class="records-list">
-      <div v-if="loading" class="loading">加载中...</div>
-      <div v-else-if="gameRecords.length === 0" class="no-records">
-        暂无游戏记录
-      </div>
-      <div v-else class="records-container">
-        <div v-for="record in gameRecords" :key="record.id" class="record-item">
-          <div class="record-header">
-            <span class="game-type">{{ getGameTypeName(record.game_type) }}</span>
-            <span class="record-date">{{ formatDate(record.start_time) }}</span>
-          </div>
-          <div class="record-details">
-            <div class="detail-item">
-              <span class="label">得分:</span>
-              <span class="value">{{ record.score }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="label">准确率:</span>
-              <span class="value">{{ record.accuracy }}%</span>
-            </div>
-            <div class="detail-item">
-              <span class="label">游戏时长:</span>
-              <span class="value">{{ formatDuration(record.duration_seconds) }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="label">回合:</span>
-              <span class="value">{{ record.rounds_played }}/{{ record.rounds_total }}</span>
-            </div>
-          </div>
-          <div class="record-status" :class="record.status">
-            {{ getStatusText(record.status) }}
-          </div>
+    <!-- 吸顶Tab栏 -->
+    <div class="tabs-container">
+      <div class="tabs">
+        <div class="tab" :class="{ active: activeTab === 'records' }" @click="activeTab = 'records'">
+          游戏记录
+        </div>
+        <div class="tab" :class="{ active: activeTab === 'achievements' }" @click="activeTab = 'achievements'">
+          我的成就
         </div>
       </div>
     </div>
 
-    <!-- 加载更多按钮 -->
-    <div v-if="hasMoreRecords" class="load-more">
-      <button @click="loadMore" :disabled="loadingMore">
-        {{ loadingMore ? '加载中...' : '加载更多' }}
-      </button>
+    <!-- 游戏记录内容区域 -->
+    <div v-if="activeTab === 'records'" class="tab-content records-content">
+      <!-- 统计概览 -->
+      <div class="stats-overview">
+        <div class="stat-card">
+          <div class="stat-value">{{ totalGames }}</div>
+          <div class="stat-label">总游戏次数</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ averageScore.toFixed(1) }}</div>
+          <div class="stat-label">平均得分</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ bestScore }}</div>
+          <div class="stat-label">最高得分</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ averageAccuracy.toFixed(1) }}%</div>
+          <div class="stat-label">平均准确率</div>
+        </div>
+      </div>
+
+      <!-- 游戏类型筛选 -->
+      <div class="game-filter">
+        <select v-model="selectedGameType" @change="loadGameRecords">
+          <option value="">所有游戏</option>
+          <option value="same_pattern_hunt">相同图案狩猎</option>
+          <option value="memorial_banquet">记忆盛宴</option>
+        </select>
+      </div>
+
+      <!-- 游戏记录列表 -->
+      <div class="records-list">
+        <div v-if="loading" class="loading">加载中...</div>
+        <div v-else-if="gameRecords.length === 0" class="no-records">
+          暂无游戏记录
+        </div>
+        <div v-else class="records-container">
+          <div v-for="record in gameRecords" :key="record.id" class="record-item">
+            <div class="record-header">
+              <span class="game-type">{{ getGameTypeName(record.game_type) }}</span>
+              <span class="record-date">{{ formatDate(record.start_time) }}</span>
+            </div>
+            <div class="record-details">
+              <div class="detail-item">
+                <span class="label">得分:</span>
+                <span class="value">{{ record.score }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="label">准确率:</span>
+                <span class="value">{{ record.accuracy }}%</span>
+              </div>
+              <div class="detail-item">
+                <span class="label">游戏时长:</span>
+                <span class="value">{{ formatDuration(record.duration_seconds) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="label">回合:</span>
+                <span class="value">{{ record.rounds_played }}/{{ record.rounds_total }}</span>
+              </div>
+            </div>
+            <div class="record-status" :class="record.status">
+              {{ getStatusText(record.status) }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 加载更多按钮 -->
+      <div v-if="hasMoreRecords" class="load-more">
+        <button @click="loadMore" :disabled="loadingMore">
+          {{ loadingMore ? '加载中...' : '加载更多' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 成就内容区域 -->
+    <div v-if="activeTab === 'achievements'" class="tab-content achievements-content">
+      <!-- 成就筛选 -->
+      <div class="achievement-filter">
+        <label>
+          <input type="checkbox" v-model="onlyUnlocked" @change="loadAchievements" />
+          只显示已解锁
+        </label>
+      </div>
+
+      <!-- 成就列表 -->
+      <div class="achievements-list">
+        <div v-if="achievementsLoading" class="loading">加载中...</div>
+        <div v-else-if="achievements.length === 0" class="no-achievements">
+          {{ onlyUnlocked ? '暂无已解锁成就' : '暂无成就数据' }}
+        </div>
+        <div v-else class="achievements-grid">
+          <div v-for="item in filteredAchievements" :key="item.achievement.id" class="achievement-card"
+            :class="{ 'unlocked': item.is_unlocked }">
+            <div class="achievement-icon">{{ item.achievement.icon || '⭐' }}</div>
+            <h3>{{ item.achievement.name }}</h3>
+            <p>{{ item.achievement.description }}</p>
+            <!-- 显示达成条件 -->
+            <div class="achievement-condition">
+              <small>达成条件: {{ getItemConditionText(item) }}</small>
+            </div>
+            <!-- 显示进度 -->
+            <div class="achievement-progress" v-if="!item.is_unlocked">
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: `${item.progress_percentage}%` }"></div>
+              </div>
+              <span class="progress-text">{{ item.current_progress }}/{{ item.achievement.target_value }}</span>
+            </div>
+            <div class="achievement-status" v-if="item.is_unlocked">
+              已解锁于 {{ formatDate(item.unlocked_at) }}
+            </div>
+            <div class="achievement-status locked" v-else>
+              未解锁
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -96,11 +154,15 @@ const router = useRouter()
 // 响应式数据
 const gameRecords = ref([])
 const playerStats = ref([])
+const achievements = ref([])
 const loading = ref(false)
 const loadingMore = ref(false)
+const achievementsLoading = ref(false)
 const selectedGameType = ref('')
+const onlyUnlocked = ref(false)
 const currentPage = ref(1)
 const hasMoreRecords = ref(false)
+const activeTab = ref('records') // 当前激活的tab
 
 // 计算属性
 const totalGames = computed(() => {
@@ -258,29 +320,36 @@ const loadMore = () => {
 const getGameTypeName = (gameType) => {
   const gameNames = {
     'same_pattern_hunt': '相同图案狩猎',
-    'samePatternHunt': '相同图案狩猎'
+    'samePatternHunt': '相同图案狩猎',
+    'memorial_banquet': '记忆盛宴'
   }
   return gameNames[gameType] || gameType
 }
 
 const formatDate = (dateString) => {
   try {
-    // 尝试处理不同格式的日期字符串
-    if (!dateString.includes('Z')) {
-      dateString += 'Z'
+    // 确保日期字符串以'Z'结尾，表示UTC时间
+    // 游戏记录和成就都使用相同的日期处理逻辑
+    let formattedDateString = dateString;
+    if (typeof dateString === 'string' && !dateString.endsWith('Z')) {
+      formattedDateString = dateString + 'Z';
     }
-    const date = new Date(dateString)
-    console.log(date, dateString);
+    const date = new Date(formattedDateString)
+    console.log(date, dateString, formattedDateString);
     // 检查是否是有效的日期
     if (isNaN(date.getTime())) {
       console.warn('无效的日期字符串:', dateString)
       return '未知时间'
     }
 
-    return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    // 使用UTC时间并手动调整到UTC+8时区
+    // 确保正确显示中国标准时间
+    return date.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }) + ' ' +
+      date.toLocaleTimeString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
   } catch (error) {
     console.error('日期格式化错误:', error)
     return '日期错误'
@@ -309,8 +378,69 @@ const goBack = () => {
   router.back()
 }
 
+// 计算属性：根据筛选条件过滤成就
+const filteredAchievements = computed(() => {
+  if (onlyUnlocked.value) {
+    return achievements.value.filter(item => item.is_unlocked)
+  }
+  return achievements.value
+})
+
+// 获取成就条件的可读文本
+const getItemConditionText = (item) => {
+  const achievement = item.achievement
+  const conditionMap = {
+    'game_complete': '完成游戏',
+    'game_win': '赢得游戏',
+    'score_reach': '达到分数',
+    'accuracy_reach': '达到准确率',
+    'streak_reach': '连续获胜'
+  }
+
+  const conditionType = conditionMap[achievement.condition_type] || achievement.condition_type
+  return `${conditionType} ${achievement.target_value}次`
+}
+
+// 加载成就
+const loadAchievements = async () => {
+  // 检查用户是否已登录
+  if (!userStore.isLoggedIn) {
+    console.log('用户未登录，无法加载成就')
+    return
+  }
+
+  achievementsLoading.value = true
+
+  try {
+    console.log('加载成就')
+    const response = await fetch(`${API_BASE_URL}/achievements/all`, {
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+
+    console.log('成就API响应状态:', response.status)
+
+    if (response.ok) {
+      const data = await response.json()
+      achievements.value = data
+      console.log('成就加载成功，数量:', data.length)
+    } else {
+      console.error('成就API错误:', response.status, await response.text())
+    }
+  } catch (error) {
+    console.error('加载成就失败:', error)
+  } finally {
+    achievementsLoading.value = false
+  }
+}
+
 // 生命周期
-onMounted(() => {
+onMounted(async () => {
+  // 先检查并确保登录状态已更新
+  await userStore.checkLoginStatus()
+
   // 检查用户是否已登录
   if (!userStore.isLoggedIn) {
     console.log('用户未登录，跳转到登录页面')
@@ -318,10 +448,11 @@ onMounted(() => {
     return
   }
 
-  console.log('用户已登录，开始加载游戏记录')
+  console.log('用户已登录，开始加载游戏记录和成就')
   console.log('使用cookie认证方式，credentials: include')
   loadPlayerStats()
   loadGameRecords()
+  loadAchievements()
 })
 </script>
 
@@ -329,12 +460,12 @@ onMounted(() => {
 .game-records-page {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 20px 20px 60px;
 }
 
 .page-header {
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 20px;
   position: relative;
   padding-top: 20px;
 }
@@ -345,9 +476,60 @@ onMounted(() => {
   margin-bottom: 10px;
 }
 
-.page-header p {
+/* 吸顶Tab栏样式 */
+.tabs-container {
+  position: sticky;
+  top: 0;
+  background: white;
+  z-index: 100;
+  border-bottom: 2px solid #f0f0f0;
+  margin-bottom: 30px;
+}
+
+.tabs {
+  display: flex;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 16px 20px;
+  cursor: pointer;
   font-size: 1.1rem;
+  font-weight: 500;
   color: #666;
+  transition: all 0.3s ease;
+  border-bottom: 3px solid transparent;
+}
+
+.tab:hover {
+  color: #4CAF50;
+  background: #f8fff8;
+}
+
+.tab.active {
+  color: #4CAF50;
+  border-bottom-color: #4CAF50;
+  background: #f1f8e9;
+}
+
+/* Tab内容区域样式 */
+.tab-content {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .stats-overview {
@@ -530,6 +712,144 @@ onMounted(() => {
 .load-more button:disabled {
   background: #ccc;
   cursor: not-allowed;
+}
+
+/* 成就内容区域样式 */
+.achievements-content {
+  margin-top: 20px;
+}
+
+.achievements-section h2 {
+  text-align: center;
+  font-size: 2rem;
+  color: #333;
+  margin-bottom: 20px;
+}
+
+.achievement-filter {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.achievement-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  color: #666;
+  cursor: pointer;
+}
+
+.achievement-filter input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #4CAF50;
+}
+
+.achievements-list {
+  margin-bottom: 40px;
+}
+
+.loading,
+.no-achievements {
+  text-align: center;
+  padding: 60px 20px;
+  font-size: 1.2rem;
+  color: #666;
+}
+
+.achievements-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.achievement-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 25px;
+  text-align: center;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  opacity: 0.6;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.achievement-card.unlocked {
+  opacity: 1;
+  background: linear-gradient(135deg, #f6fbf9 0%, #e8f5e9 100%);
+  border-color: #c8e6c9;
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.1);
+}
+
+.achievement-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+}
+
+.achievement-card.unlocked:hover {
+  box-shadow: 0 8px 20px rgba(76, 175, 80, 0.2);
+}
+
+.achievement-icon {
+  font-size: 3rem;
+  margin-bottom: 15px;
+}
+
+.achievement-card h3 {
+  font-size: 1.3rem;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.achievement-card p {
+  color: #666;
+  font-size: 0.95rem;
+  margin-bottom: 15px;
+  line-height: 1.5;
+}
+
+.achievement-condition {
+  margin-bottom: 10px;
+  color: #777;
+}
+
+.achievement-progress {
+  margin-bottom: 15px;
+}
+
+.progress-bar {
+  height: 8px;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 5px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #4CAF50;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.achievement-status {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #4CAF50;
+}
+
+.achievement-status.locked {
+  color: #9e9e9e;
 }
 
 @media (max-width: 768px) {

@@ -1,9 +1,6 @@
 <template>
   <div class="home-page">
-    <header class="header">
-      <h1>🎯 QuizArena</h1>
-      <p>欢迎来到多人知识竞技场</p>
-    </header>
+    <InfiniteGameScroll />
 
     <main class="main-content">
       <!-- 用户信息区域 -->
@@ -38,8 +35,22 @@
 
           <div class="game-card" @click="navigateToGame('samePatternHunt')">
             <div class="game-icon">🔍</div>
-            <h3>找相同</h3>
-            <p>快速找出相同图案</p>
+            <h3>狩猎目标图案</h3>
+            <p>记忆图案位置，找出目标图案</p>
+            <button class="play-btn">开始游戏</button>
+          </div>
+
+          <div class="game-card" @click="navigateToGame('hiddenWallMaze')">
+            <div class="game-icon">🧭</div>
+            <h3>记忆的迷宫</h3>
+            <p>通过记忆路径找到出口</p>
+            <button class="play-btn">开始游戏</button>
+          </div>
+
+          <div class="game-card" @click="navigateToGame('memorialBanquet')">
+            <div class="game-icon">🎴</div>
+            <h3>记忆盛宴</h3>
+            <p>匹配卡牌数字，升级提升分数</p>
             <button class="play-btn">开始游戏</button>
           </div>
         </div>
@@ -59,9 +70,13 @@
 <script>
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/userStore'
+import InfiniteGameScroll from '../components/InfiniteGameScroll.vue'
 
 export default {
   name: 'HomePage',
+  components: {
+    InfiniteGameScroll
+  },
   setup() {
     const userStore = useUserStore()
     const router = useRouter()
@@ -71,6 +86,10 @@ export default {
         router.push('/quiz/enter')
       } else if (gameType === 'samePatternHunt') {
         router.push('/samePatternHunt')
+      } else if (gameType === 'hiddenWallMaze') {
+        router.push('/hiddenWallMaze')
+      } else if (gameType === 'memorialBanquet') {
+        router.push('/memorialBanquet')
       }
     }
 
@@ -264,8 +283,8 @@ export default {
 
 .games-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 30px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 25px;
   margin-bottom: 40px;
 }
 
@@ -364,17 +383,17 @@ export default {
   .games-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .header h1 {
     font-size: 2rem;
   }
-  
+
   .user-section {
     flex-direction: column;
     gap: 15px;
     text-align: center;
   }
-  
+
   .user-actions {
     justify-content: center;
     flex-wrap: wrap;
