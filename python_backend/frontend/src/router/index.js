@@ -17,7 +17,18 @@ import TestPage_Quiz from '../games/00-quiz/views/testPage.vue';
 import GameLobby from '../games/01-samePatternHunt/pages/GameLobby.vue';
 import RoomPage from '../games/01-samePatternHunt/pages/RoomPage.vue';
 import GamePage from '../games/01-samePatternHunt/pages/GamePage.vue';
-import ResultPage from '../games/01-samePatternHunt/pages/ResultPage.vue';
+
+// 02-hiddenWallMaze 游戏相关页面
+import MazeGame from '../games/02-hiddenWallMaze/MazeGame.vue';
+import MazeList from '../games/02-hiddenWallMaze/MazeList.vue';
+
+// 03-memorialBanquet 游戏相关页面
+import MemorialBanquetLobby from '../games/03-memorialBanquet/pages/GameLobby.vue';
+import MemorialBanquetRoom from '../games/03-memorialBanquet/pages/RoomPage.vue';
+import MemorialBanquetGame from '../games/03-memorialBanquet/pages/GamePage.vue';
+import MemorialBanquetFinalState from '../games/03-memorialBanquet/pages/FinalStatePage.vue';
+
+
 
 const routes = [
   // 主页路由
@@ -83,7 +94,22 @@ const routes = [
       { path: '', name: 'SPHLobby', component: GameLobby },
       { path: 'room/:roomId', name: 'SPHRoom', component: RoomPage },
       { path: 'game/:roomId', name: 'SPHGame', component: GamePage },
-      { path: 'result/:roomId', name: 'SPHResult', component: ResultPage },
+    ]
+  },
+  {
+    path: '/hiddenWallMaze',
+    children: [
+      { path: '', name: 'MazeList', component: MazeList },
+      { path: 'maze/:id', name: 'MazeGame', component: MazeGame },
+    ]
+  },
+  {
+    path: '/memorialBanquet',
+    children: [
+      { path: '', name: 'MBLobby', component: MemorialBanquetLobby },
+      { path: 'room/:roomId', name: 'MBRoom', component: MemorialBanquetRoom },
+      { path: 'game/:roomId', name: 'MBGame', component: MemorialBanquetGame },
+      { path: 'final/:roomId', name: 'MBFinalState', component: MemorialBanquetFinalState },
     ]
   }
 ];
@@ -103,12 +129,13 @@ const router = createRouter({
   routes
 });
 
-// 全局路由守卫 - 为SPH相关路由添加登录验证
+// 全局路由守卫 - 为SPH和MB相关路由添加登录验证
 router.beforeEach((to, from, next) => {
-  // 检查是否为SPH相关路由
+  // 检查是否为SPH或MB相关路由
   const isSPHRoute = to.path.startsWith('/samePatternHunt');
-  
-  if (isSPHRoute) {
+  const isMBRoute = to.path.startsWith('/memorialBanquet');
+
+  if (isSPHRoute || isMBRoute) {
     const userStore = useUserStore();
     if (!userStore.isLoggedIn) {
       // 保存目标路由，登录后可以重定向回来
@@ -117,7 +144,7 @@ router.beforeEach((to, from, next) => {
       return;
     }
   }
-  
+
   next();
 });
 

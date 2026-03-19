@@ -5,9 +5,10 @@ from .games.base import BaseGame
 from .models.player import Player
 
 class Room:
-    def __init__(self, room_id: str, game: BaseGame, owner_info: Optional[Dict[str, Any]] = None, name: str = ""):
+    def __init__(self, room_id: str, game: BaseGame, owner_info: Optional[Dict[str, Any]] = None, name: str = "",gameType:str = ""):
         self.room_id = room_id
         self.game = game
+        self.gameType = gameType
         self.reconnect_timeout = 30  # 增加到30秒，为玩家重连提供充足时间
         self.owner: Optional[Dict[str, Any]] = owner_info if owner_info and "id" in owner_info and "name" in owner_info else None
         self.name = name or room_id
@@ -49,8 +50,13 @@ class Room:
         """处理来自客户端的消息"""
         message_type = message.get("type")
         player_id = self.connections.get(websocket)
-        
+        print(f"📥 Room.handle_event: message_type={message_type}, player_id={player_id}, room_status={self.status}, gameType={self.gameType}")
+        print("251102quiz问答游戏debug",message) 
         if not player_id:
+            return
+        
+        if self.gameType == "quiz":
+            await self.game.handle_event(websocket, message, player_id)
             return
         
         if self.status == "waiting":
@@ -84,12 +90,15 @@ class Room:
         
         elif self.status == "playing":
             # 转发游戏内消息给游戏实例处理
+            print(f"🎮 转发消息到游戏实例: message={message}")
             await self.game.handle_event(websocket, message, player_id)
         
         # 处理设置更新请求（在任何状态下都可以处理）
         if message_type == "update_settings":
             if "settings" in message:
                 result = await self.update_settings(player_id, message["settings"])
+                # 确保返回的消息包含type字段
+                result["type"] = "settings_updated"
                 await websocket.send_json(result)
 
     def can_start_game(self) -> bool:
@@ -175,7 +184,8 @@ class Room:
             },
             "player_count": len(self.players),
             "max_players": self.game.config.get("max_players", 2),
-            "min_players": self.game.config.get("min_players", 2)
+            "min_players": self.game.config.get("min_players", 2),
+            "difficulty": self.game.config.get("difficulty", "normal")
         }
         
         # 使用字典键的副本进行遍历，避免并发修改问题
@@ -239,6 +249,8 @@ class Room:
             self.game.config["max_players"] = settings["max_players"]
         if "min_players" in settings:
             self.game.config["min_players"] = settings["min_players"]
+        if "difficulty" in settings:
+            self.game.config["difficulty"] = settings["difficulty"]
             
         await self.broadcast_state()
         return {"success": True, "message": "游戏设置已更新"}

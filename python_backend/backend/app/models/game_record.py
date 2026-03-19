@@ -1,8 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, Boolean, ForeignKey, Text, BigInteger
-from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
-
-Base = declarative_base()
+from . import Base
 
 class GameSession(Base):
     """游戏会话记录模型"""

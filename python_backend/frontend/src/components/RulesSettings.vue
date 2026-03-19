@@ -72,19 +72,26 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore'
+import { useMemorialBanquetStore } from '@/stores/memorialBanquetStore'
 
-const store = useSamePatternHuntStore()
-const localRules = ref({ ...store.gameRules })
+const sphStore = useSamePatternHuntStore()
+const mbStore = useMemorialBanquetStore()
 
-// 监听store规则变化
-watch(() => store.gameRules, (newRules) => {
+const isMemorialBanquet = computed(() => {
+  return window.location.pathname.includes('/memorialBanquet')
+})
+
+const store = computed(() => isMemorialBanquet.value ? mbStore : sphStore)
+const localRules = ref({ ...store.value.gameRules })
+
+watch(() => store.value.gameRules, (newRules) => {
   localRules.value = { ...newRules }
 }, { deep: true })
 
 const updateRules = () => {
-  store.updateGameRules(localRules.value)
+  store.value.updateGameRules(localRules.value)
 }
 </script>
 

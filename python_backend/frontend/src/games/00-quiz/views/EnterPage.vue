@@ -10,12 +10,7 @@
             {{ avatar }}
           </option>
         </select>
-        <input 
-          v-model="customAvatarUrl" 
-          @input="updateAvatarUrl" 
-          placeholder="或输入自定义头像 URL" 
-          class="input-field" 
-        />
+        <input v-model="customAvatarUrl" @input="updateAvatarUrl" placeholder="或输入自定义头像 URL" class="input-field" />
         <div class="avatar-preview" v-if="avatarUrl">
           <img :src="avatarUrl" alt="头像预览" class="avatar-image" />
         </div>
@@ -75,7 +70,6 @@ export default {
           avatarUrl: avatarUrl.value.trim() || '',
           playerId: playerId
         });
-
         // 将 playerId 作为查询参数带入 AnswerPage
         router.push({
           name: 'QuizAnswerPage',
@@ -104,7 +98,6 @@ export default {
     const enterQuestionPage = () => {
       if (questionRoomId.value.trim()) {
         const playerId = generateUniqueId('questioner');  // 生成随机 playerId
-
         // 将 playerId 作为查询参数带入 QuestionPage
         router.push({
           name: 'QuizQuestionPage',
@@ -212,7 +205,9 @@ h1 {
 .avatar-image {
   width: 50px;
   height: 50px;
-  border-radius: 50%; /* 圆形 */
-  object-fit: cover; /* 确保图片填满整个区域 */
+  border-radius: 50%;
+  /* 圆形 */
+  object-fit: cover;
+  /* 确保图片填满整个区域 */
 }
 </style>

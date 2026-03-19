@@ -13,26 +13,15 @@
         </div>
         
         <div class="user-info-section">
-          <div class="form-group">
-            <label for="username">用户名</label>
-            <input 
-              id="username"
-              v-model="tempUsername" 
-              type="text" 
-              class="form-input" 
-              placeholder="请输入用户名"
-            />
+          <div class="user-name-display">
+            <span class="display-label">用户名</span>
+            <span class="display-value">{{ userStore.user?.username || '未设置' }}</span>
           </div>
           
-          <div class="user-stats">
-            <div class="stat-item">
-              <span class="stat-label">游戏次数</span>
-              <span class="stat-value">{{ userStats.gameCount || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">胜率</span>
-              <span class="stat-value">{{ userStats.winRate || '0%' }}</span>
-            </div>
+          <div class="game-records-link">
+            <button @click="goToGameRecords" class="records-btn">
+              查看游戏记录
+            </button>
           </div>
         </div>
       </div>
@@ -45,7 +34,7 @@
 
       <!-- 设置操作按钮 -->
       <div class="settings-actions">
-        <button @click="saveSettings" class="save-btn" :disabled="!isFormValid">
+        <button @click="saveSettings" class="save-btn">
           保存设置
         </button>
         <button @click="cancelChanges" class="cancel-btn">
@@ -83,15 +72,11 @@ const router = useRouter();
 const userStore = useUserStore();
 
 // 响应式数据
-const tempUsername = ref('');
 const tempAvatar = ref('');
 const avatarSelectorRef = ref(null);
 
-// 用户统计信息
-const userStats = ref({
-  gameCount: 0,
-  winRate: '0%'
-});
+// 无需用户统计信息
+// 用户统计信息已移除，改为跳转到游戏记录页
 
 // 其他设置
 const settings = ref({
@@ -99,16 +84,13 @@ const settings = ref({
   soundEffects: true
 });
 
-// 计算属性：表单验证
-const isFormValid = computed(() => {
-  return tempUsername.value.trim().length > 0;
-});
-
 // 生命周期
-onMounted(() => {
+onMounted(async () => {
+  // 等待登录状态检查完成
+  await userStore.checkLoginStatus();
+  
   // 初始化用户数据
   if (userStore.user) {
-    tempUsername.value = userStore.user.username || '';
     tempAvatar.value = userStore.user.avatar || getDefaultAvatar();
   } else {
     // 如果没有用户数据，也显示默认头像
@@ -153,9 +135,8 @@ async function saveSettings() {
       }
     }
 
-    // 更新用户信息
+    // 更新用户信息（只更新头像和设置）
     const updateData = {
-      username: tempUsername.value,
       avatar: finalAvatar,
       settings: settings.value
     };
@@ -182,6 +163,11 @@ async function saveSettings() {
 // 取消更改
 function cancelChanges() {
   router.back();
+}
+
+// 跳转到游戏记录页面
+function goToGameRecords() {
+  router.push('/records');
 }
 </script>
 
@@ -248,53 +234,48 @@ function cancelChanges() {
   flex: 1;
 }
 
-.form-group {
+.user-name-display {
   margin-bottom: 20px;
 }
 
-.form-group label {
+.display-label {
   display: block;
   margin-bottom: 8px;
   color: #2c3e50;
   font-weight: 600;
 }
 
-.form-input {
-  width: 100%;
+.display-value {
+  display: block;
   padding: 12px 16px;
-  border: 2px solid #e9ecef;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
   border-radius: 10px;
-  font-size: 1rem;
-  transition: border-color 0.3s;
+  font-size: 1.1rem;
+  color: #495057;
+  font-weight: 500;
 }
 
-.form-input:focus {
-  outline: none;
-  border-color: #667eea;
-}
-
-.user-stats {
-  display: flex;
-  gap: 30px;
+.game-records-link {
   margin-top: 20px;
 }
 
-.stat-item {
-  text-align: center;
-}
-
-.stat-label {
-  display: block;
-  font-size: 0.9rem;
-  color: #6c757d;
-  margin-bottom: 5px;
-}
-
-.stat-value {
-  display: block;
-  font-size: 1.5rem;
+.records-btn {
+  width: 100%;
+  padding: 12px 24px;
+  background: linear-gradient(45deg, #667eea, #764ba2);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
   font-weight: 600;
-  color: #667eea;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.records-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
 }
 
 /* 头像选择器样式调整 */
@@ -324,13 +305,7 @@ function cancelChanges() {
   color: white;
 }
 
-.save-btn:disabled {
-  background: #6c757d;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.save-btn:not(:disabled):hover {
+.save-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
 }
