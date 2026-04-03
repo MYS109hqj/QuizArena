@@ -10,7 +10,7 @@ function getStorageKey(gameType) {
   return `${gameType}_LAST_CONNECTION`;
 }
 
-export function connectSPHSocket(onMessage, roomId, player_info, gameType = 'o3MB') {
+export function connectSPHSocket(onMessage, roomId, player_info, gameType = 'o2SPH') {
   if (!roomId) {
     const hasRestored = restoreConnection(onMessage);
     if (hasRestored) {
@@ -137,7 +137,7 @@ export function sendSPHMessage(msg) {
   }
 }
 
-export function closeSPHSocket(gameType = 'o3MB') {
+export function closeSPHSocket(gameType = 'o2SPH') {
   if (socket) {
     isManualClose = true;
     socket.close(1000, 'Normal closure');
@@ -145,7 +145,7 @@ export function closeSPHSocket(gameType = 'o3MB') {
   }
 }
 
-export function hasPendingConnection(gameType = 'o3MB') {
+export function hasPendingConnection(gameType = 'o2SPH') {
   const sessionRouteChange = sessionStorage.getItem('SPH_ROUTE_CHANGING');
   if (sessionRouteChange) {
     return false;
