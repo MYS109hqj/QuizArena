@@ -28,6 +28,11 @@ import MemorialBanquetRoom from '../games/03-memorialBanquet/pages/RoomPage.vue'
 import MemorialBanquetGame from '../games/03-memorialBanquet/pages/GamePage.vue';
 import MemorialBanquetFinalState from '../games/03-memorialBanquet/pages/FinalStatePage.vue';
 
+// 999-template 游戏相关页面
+import TemplateLobby from '../games/999-template/pages/GameLobby.vue';
+import TemplateRoom from '../games/999-template/pages/RoomPage.vue';
+import TemplateGame from '../games/999-template/pages/GamePage.vue';
+
 
 
 const routes = [
@@ -110,6 +115,14 @@ const routes = [
       { path: 'room/:roomId', name: 'MBRoom', component: MemorialBanquetRoom },
       { path: 'game/:roomId', name: 'MBGame', component: MemorialBanquetGame },
       { path: 'final/:roomId', name: 'MBFinalState', component: MemorialBanquetFinalState },
+    ]
+  },
+  {
+    path: '/template',
+    children: [
+      { path: '', name: 'TemplateLobby', component: TemplateLobby },
+      { path: 'room/:roomId', name: 'TemplateRoom', component: TemplateRoom },
+      { path: 'game/:roomId', name: 'TemplateGame', component: TemplateGame },
     ]
   }
 ];
