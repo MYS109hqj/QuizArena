@@ -14,7 +14,7 @@ function getUserData() {
       avatarUrl: userStore.user.avatar || "https://images.unsplash.com/photo-1560169573-5ff6f7f35fe4?w=300&h=300&fit=crop&q=85&auto=format"
     };
   }
-  
+
   // 如果用户未登录，返回默认数据
   return {
     player_id: `guest-${Date.now()}`,
@@ -26,7 +26,7 @@ function getUserData() {
 const initializeCards = () => {
   const letters = 'ABCDEFGHIJKLMNOP'.split('');
   return letters.map((letter, index) => ({
-    cardId: `A${index+1}`,
+    cardId: `A${index + 1}`,
     letter,        // 正面字母
     patternId: null // 背面图案，初始为空，点击后由后端返回
   }));
@@ -68,13 +68,13 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
       room_id: null,
       room: {},
       players: {},
-      
+
       // 房间缓存，用于预加载优化
       roomCache: {},
-      
+
       gameStatus: 'waiting',
       gameState: {
-        state: "StoreIniting", 
+        state: "StoreIniting",
         current_player: "StoreIniting",
         gameInfo: {},
         round: 999,
@@ -83,32 +83,32 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
       flippedCards: [],     // 当前已翻面的卡片 ID
       matchedCards: [],     // 已匹配成功的卡片 ID
       unmatchedCards: [],   // 临时不匹配的卡片 ID（用于动画）
-      
+
       // 规则配置
       gameRules: {
         // 现有特殊规则（保持原样）
         allowSimultaneousActions: true,
-        
+
         // 新增规则选项
         flipRestrictions: {
           preventFlipDuringAnimation: false, // 牌未翻回限制
           waitForOthersToFlipBack: false,    // 等待他人翻回限制
           actionLockEnabled: true            // 行动锁定限制（现有）
         },
-        
+
         // 规则参数配置
         animationDuration: 5000,      // 翻牌动画时长
         maxConcurrentFlips: 1,        // 最大同时翻牌数
         turnTransitionDelay: 1000     // 回合转换延迟
       },
-      
+
       // 终局状态数据
       finalState: null,
-      
+
       // 调试模式状态
       debugMode: import.meta.env.VITE_DEBUG_MODE === 'true' || false,
       debugPanelVisible: false,
-      
+
       // 成就系统相关状态
       achievements: [], // 所有已解锁的成就
       recentAchievements: [] // 最近解锁的成就，用于显示通知
@@ -116,36 +116,36 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
   },
 
   actions: {
-      // 同步用户数据从userStore
-      syncUserData() {
-        try {
-          // 不需要传入userStore参数，getUserData内部会自己获取
-          const playerData = getUserData();
-          
-          // 只有当用户数据有变化时才更新
-          if (playerData.player_id !== this.player_id || 
-              playerData.player_name !== this.player_name || 
-              playerData.avatarUrl !== this.avatarUrl) {
-            this.player_id = playerData.player_id;
-            this.player_name = playerData.player_name;
-            this.avatarUrl = playerData.avatarUrl;
-            
-            console.log('👤 用户数据已同步:', {
-              player_id: this.player_id,
-              player_name: this.player_name
-            });
-          }
-        } catch (error) {
-          console.error('❌ 同步用户数据失败:', error);
-          // 保持现有数据
+    // 同步用户数据从userStore
+    syncUserData() {
+      try {
+        // 不需要传入userStore参数，getUserData内部会自己获取
+        const playerData = getUserData();
+
+        // 只有当用户数据有变化时才更新
+        if (playerData.player_id !== this.player_id ||
+          playerData.player_name !== this.player_name ||
+          playerData.avatarUrl !== this.avatarUrl) {
+          this.player_id = playerData.player_id;
+          this.player_name = playerData.player_name;
+          this.avatarUrl = playerData.avatarUrl;
+
+          console.log('👤 用户数据已同步:', {
+            player_id: this.player_id,
+            player_name: this.player_name
+          });
         }
-      },
-      
-      // 初始化store，包括用户数据同步
-      initStore() {
-        // 同步用户数据
-        this.syncUserData();
-      
+      } catch (error) {
+        console.error('❌ 同步用户数据失败:', error);
+        // 保持现有数据
+      }
+    },
+
+    // 初始化store，包括用户数据同步
+    initStore() {
+      // 同步用户数据
+      this.syncUserData();
+
       // 设置监听，在userStore数据变化时自动同步
       const userStore = useUserStore();
       if (userStore && userStore.$subscribe) {
@@ -153,26 +153,26 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
           this.syncUserData();
         });
       }
-      
+
       // 初始化调试模式
       this.initDebugMode();
     },
-    
+
     // 初始化调试模式
     initDebugMode() {
       // 检查URL参数和localStorage中的调试模式设置
       const urlParams = new URLSearchParams(window.location.search);
       const debugFromURL = urlParams.get('debug') === 'true';
       const debugFromStorage = localStorage.getItem('DEBUG_MODE') === 'true';
-      
+
       this.debugMode = debugFromURL || debugFromStorage;
-      
+
       if (this.debugMode) {
         console.log('🔧 调试模式已启用');
         this.addDebugLog('调试模式已启用');
       }
     },
-    
+
     // 从userStore同步用户信息
     syncUserData() {
       const userStore = useUserStore();
@@ -182,7 +182,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
         this.avatarUrl = userStore.user.avatar || this.avatarUrl;
       }
     },
-    
+
     // 设置玩家信息（现在直接使用userStore的数据）
     setPlayerProfile(name, avatar) {
       const userStore = useUserStore();
@@ -262,8 +262,8 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
 
           // 建立该房间的 WebSocket 连接，并传入回调处理消息
           connectSPHSocket((data) => {
-            this.handleMessage(data); // 所有消息统一由 store 处理
-          }, roomId, player_info);
+            this.handleMessage(data);
+          }, roomId, player_info, 'o2SPH');
 
           this.room_id = roomId; // 设置 room_id，触发 watch 跳转
           console.log(`✅ WebSocket连接建立完成，耗时: ${Date.now() - connectStartTime}ms`);
@@ -293,73 +293,73 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
     },
 
     async send(message) {
-        if (this.mockEnabled) {
-            if (message.type === 'get_room_list') {
-            this.rooms = createMockRooms(); // 重新加载
-            }
-            if (message.type === 'create_room') {
+      if (this.mockEnabled) {
+        if (message.type === 'get_room_list') {
+          this.rooms = createMockRooms(); // 重新加载
+        }
+        if (message.type === 'create_room') {
+          // 从后端获取房间 ID
+          const gameType = 'o2SPH';
+          axios.get(`${import.meta.env.VITE_URL}/api/new-room-id-short/${gameType}`)
+            .then(response => {
+              const newRoom = {
+                id: response.data.room_id,
+                owner: 'You',
+                players: ['You'],
+
+                status: 'waiting',
+              };
+              this.rooms.unshift(newRoom); // 添加到顶部
+            });
+        }
+      }
+      else {
+        // 发送到真实 WebSocket
+        if (message.type === 'create_room') {
+          this.creatingRoom = true;
+          try {
             // 从后端获取房间 ID
-                const gameType = 'o2SPH';
-                axios.get(`${import.meta.env.VITE_URL}/api/new-room-id-short/${gameType}`)
-                .then(response => {
-                    const newRoom = {
-                    id: response.data.room_id,
-                    owner: 'You',
-                    players: ['You'],
+            const gameType = 'o2SPH';
+            const response = await axios.get(`${import.meta.env.VITE_URL}/api/new-room-id-short/${gameType}`);
+            this.room_id = response.data.room_id;
+            const player_info = { "type": "player_info", "id": this.player_id, "name": this.player_name, "avatar": this.avatarUrl }
+            connectSPHSocket((data) => {
+              this.handleMessage(data);
+            }, this.room_id, player_info, 'o2SPH');
 
-                    status: 'waiting',
-                    };
-                    this.rooms.unshift(newRoom); // 添加到顶部
-                });
-              }
+          } catch (error) {
+            console.error('创建房间失败:', error);
+          } finally {
+            this.creatingRoom = false;
+          }
         }
-          else {
-                // 发送到真实 WebSocket
-                if (message.type === 'create_room') {
-                    this.creatingRoom = true; 
-                    try {
-                        // 从后端获取房间 ID
-                        const gameType = 'o2SPH';
-                        const response = await axios.get(`${import.meta.env.VITE_URL}/api/new-room-id-short/${gameType}`);
-                        this.room_id = response.data.room_id;
-                        const player_info = {"type": "player_info", "id": this.player_id, "name": this.player_name, "avatar": this.avatarUrl}
-                        connectSPHSocket((data) => {
-                            this.handleMessage(data);
-                        }, this.room_id, player_info);
+        else if (message.type === 'get_room_list') {
+          try {
+            const response = await axios.get(`${import.meta.env.VITE_URL}/api/room-list/o2SPH`);
+            this.rooms = response.data.rooms;
+          } catch (error) {
+            console.error('获取房间列表失败:', error);
+          }
+        } else {
+          console.log("尝试发送消息：", message)
+          sendSPHMessage(message);
+          console.log("发送成功")
+        }
 
-                    }catch (error) {
-                        console.error('创建房间失败:', error);
-                    } finally {
-                        this.creatingRoom = false;  
-                    }
-                }
-                else if (message.type === 'get_room_list') {
-                  try {
-                    const response = await axios.get(`${import.meta.env.VITE_URL}/api/room-list/o2SPH`);
-                    this.rooms = response.data.rooms;
-                  }catch (error) {
-                        console.error('获取房间列表失败:', error);
-                  }
-                }else{
-                  console.log("尝试发送消息：",message)
-                  sendSPHMessage(message);
-                  console.log("发送成功")
-                }
-            
-        }
+      }
     },
     handleMessage(data) {
-        console.log('📨 收到消息:', data);
-        const receiveTime = Date.now();
-        
-        switch (data.type) {
+      console.log('📨 收到消息:', data);
+      const receiveTime = Date.now();
+
+      switch (data.type) {
         case 'room_state':
           console.log(`⏱️ 房间状态消息处理开始: ${receiveTime}`);
           this.room = {
-            "room_id": data.room_id, 
-            "owner": data.owner, 
+            "room_id": data.room_id,
+            "owner": data.owner,
             "config": {
-              "max_players": data.max_players, 
+              "max_players": data.max_players,
               "min_players": data.min_players
             }
           };
@@ -373,9 +373,9 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
           break;
         case 'game_state':
           this.gameState = {
-            state: data.state, 
+            state: data.state,
             current_player: data.current_player,
-            gameInfo: data.gameInfo ,
+            gameInfo: data.gameInfo,
             round: data.round
           };
 
@@ -388,7 +388,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
           break;
         case 'card_flipped':
           this.handleCardFlipped(data.result);
-        break;
+          break;
         case 'target_sequence':
           // 预留逻辑
           break;
@@ -414,14 +414,14 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
           break;
         default:
           console.warn('Unknown message type:', data.type);
-        }
+      }
     },
     handleCardFlipped(result) {
       const { cardId, matched, patternId, flipBack = 1500 } = result;
 
       // cards 现在是数组格式，直接通过索引查找
       const cardIndex = this.cards.findIndex(c => c.cardId === cardId);
-      if (cardIndex === -1) {console.warn(`Card with id ${cardId} not found`);return;}
+      if (cardIndex === -1) { console.warn(`Card with id ${cardId} not found`); return; }
 
       this.cards[cardIndex].patternId = patternId;
       // 翻面卡牌
@@ -459,34 +459,34 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
         description: achievementData.description || '',
         icon: achievementData.icon || '🏆'
       };
-      
+
       // 检查是否已经有这个成就
       const existingIndex = this.achievements.findIndex(a => a.id === achievement.id);
-      
+
       // 如果没有，则添加到总成就列表
       if (existingIndex === -1) {
         this.achievements.push(achievement);
         console.log('✅ 新成就添加到总列表:', achievement.name);
       }
-      
+
       // 检查是否已经在最近成就列表中
       const recentIndex = this.recentAchievements.findIndex(a => a.id === achievement.id);
-      
+
       // 如果不在最近成就列表中，则添加
       if (recentIndex === -1) {
         this.recentAchievements.push(achievement);
         console.log('✨ 显示成就解锁通知:', achievement.name);
-        
+
         // 可选：播放成就解锁音效
         // this.playAchievementSound();
-        
+
         // 30秒后自动清除此成就通知
         setTimeout(() => {
           this.dismissAchievement(achievement.id);
         }, 120000);
       }
     },
-    
+
     // 关闭单个成就通知
     dismissAchievement(achievementId) {
       const index = this.recentAchievements.findIndex(a => a.id === achievementId);
@@ -495,13 +495,13 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
         console.log(`📌 成就通知已关闭: ${achievementId}`);
       }
     },
-    
+
     // 清除所有最近的成就通知
     clearRecentAchievements() {
       this.recentAchievements = [];
       console.log('🧹 所有成就通知已清除');
     },
-    
+
     // 可选：播放成就解锁音效
     playAchievementSound() {
       try {
@@ -512,7 +512,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
         console.warn('🔊 无法播放成就音效:', error);
       }
     },
-    
+
     disconnect() {
       closeSPHSocket();
       this.$reset();
@@ -522,7 +522,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
     // 更新规则配置
     updateGameRules(newRules) {
       this.gameRules = { ...this.gameRules, ...newRules };
-      
+
       // 发送规则更新到后端
       if (!this.mockEnabled) {
         sendSPHMessage({
@@ -556,7 +556,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
         if (status.flipping) {
           // 卡牌正在翻转中，重新创建翻转动画
           this.flippedCards.push(cardId);
-          
+
           // 如果剩余时间大于0，设置定时器自动翻回
           if (status.remaining_time > 0) {
             setTimeout(() => {
@@ -586,7 +586,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
     handleFinalState(data) {
       console.log('📊 收到终局状态数据:', data);
       this.finalState = data;
-      
+
       // 更新卡牌状态为终局状态（显示图案面）
       if (data.cards) {
         this.cards = Object.values(data.cards).map(card => ({
@@ -597,7 +597,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
         }));
         console.log('🃏 更新后的cards:', this.cards);
       }
-      
+
       // 触发终局页面显示 - 通过更新finalState触发watch监听
       console.log('🚀 终局状态已更新，等待GamePage监听');
     },

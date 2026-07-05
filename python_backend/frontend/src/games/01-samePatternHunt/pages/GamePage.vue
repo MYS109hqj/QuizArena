@@ -31,11 +31,7 @@
             <h3 class="section-title">终局图案</h3>
             <div class="final-cards-grid">
               <div v-for="card in finalCards" :key="card.cardId" class="final-card">
-                <img 
-                  :src="getPatternImage(card.patternId)" 
-                  :alt="'图案 ' + card.patternId" 
-                  class="pattern-img"
-                />
+                <img :src="getPatternImage(card.patternId)" :alt="'图案 ' + card.patternId" class="pattern-img" />
               </div>
             </div>
           </div>
@@ -82,7 +78,8 @@
       <TargetDisplay />
     </div>
 
-    <GameOverModal :show="isGameFinished" :ranked-players="rankedPlayers" @leave="leaveGame" @playAgain="playAgain" @viewFinalState="showFinalState = true" />
+    <GameOverModal :show="isGameFinished" :ranked-players="rankedPlayers" @leave="leaveGame" @playAgain="playAgain"
+      @viewFinalState="showFinalState = true" />
   </div>
 </template>
 
@@ -194,7 +191,7 @@ onMounted(async () => {
   const handleFinalState = (data) => {
     console.log('🎯 收到终局状态事件:', data);
     console.log('store.cards:', store.cards);
-    
+
     // 确保使用store中已经更新好的cards数据
     if (store.cards && store.cards.length > 0) {
       finalCards.value = store.cards.map(card => ({
@@ -320,7 +317,7 @@ const joinNewSession = async (roomId) => {
     localStorage.removeItem('SPH_LAST_CONNECTION');
 
     // 建立新的WebSocket连接
-    connectSPHSocket(store.handleMessage, roomId, player_info);
+    connectSPHSocket(store.handleMessage, roomId, player_info, 'o2SPH');
 
     setTimeout(() => {
       isReconnecting.value = false;
