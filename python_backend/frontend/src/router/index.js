@@ -28,6 +28,11 @@ import MemorialBanquetRoom from '../games/03-memorialBanquet/pages/RoomPage.vue'
 import MemorialBanquetGame from '../games/03-memorialBanquet/pages/GamePage.vue';
 import MemorialBanquetFinalState from '../games/03-memorialBanquet/pages/FinalStatePage.vue';
 
+// 04-flip7 游戏相关页面
+import Flip7Lobby from '../games/04-flip7/pages/GameLobby.vue';
+import Flip7Room from '../games/04-flip7/pages/RoomPage.vue';
+import Flip7Game from '../games/04-flip7/pages/GamePage.vue';
+
 // 999-template 游戏相关页面
 import TemplateLobby from '../games/999-template/pages/GameLobby.vue';
 import TemplateRoom from '../games/999-template/pages/RoomPage.vue';
@@ -115,6 +120,14 @@ const routes = [
       { path: 'room/:roomId', name: 'MBRoom', component: MemorialBanquetRoom },
       { path: 'game/:roomId', name: 'MBGame', component: MemorialBanquetGame },
       { path: 'final/:roomId', name: 'MBFinalState', component: MemorialBanquetFinalState },
+    ]
+  },
+  {
+    path: '/flip7',
+    children: [
+      { path: '', name: 'Flip7Lobby', component: Flip7Lobby },
+      { path: 'room/:roomId', name: 'Flip7Room', component: Flip7Room },
+      { path: 'game/:roomId', name: 'Flip7Game', component: Flip7Game },
     ]
   },
   {

@@ -185,7 +185,10 @@ class Room:
             "player_count": len(self.players),
             "max_players": self.game.config.get("max_players", 2),
             "min_players": self.game.config.get("min_players", 2),
-            "difficulty": self.game.config.get("difficulty", "normal")
+            "difficulty": self.game.config.get("difficulty", "normal"),
+            "rules": getattr(self.game, "game_rules", {}),
+            "deck_summary": (self.game.deck_spec.summary()
+                             if hasattr(self.game, "deck_spec") else "")
         }
         
         # 使用字典键的副本进行遍历，避免并发修改问题

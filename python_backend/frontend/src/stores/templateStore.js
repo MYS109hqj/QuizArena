@@ -4,16 +4,25 @@ import { useUserStore } from './userStore';
 import axios from 'axios';
 
 function getUserData() {
-  const userStore = useUserStore();
-  if (userStore.isLoggedIn && userStore.user) {
-    return {
-      player_id: userStore.user.id || `user-${Date.now()}`,
-      player_name: userStore.user.username || '用户',
-      avatarUrl: userStore.user.avatar || "https://images.unsplash.com/photo-1560169573-5ff6f7f35fe4?w=300&h=300&fit=crop&q=85&auto=format"
-    };
+  try {
+    const userStore = useUserStore();
+    if (userStore && userStore.isLoggedIn && userStore.user) {
+      return {
+        player_id: String(userStore.user.id) || `user-${Date.now()}`,
+        player_name: userStore.user.username || '用户',
+        avatarUrl: userStore.user.avatar || "https://images.unsplash.com/photo-1560169573-5ff6f7f35fe4?w=300&h=300&fit=crop&q=85&auto=format"
+      };
+    }
+  } catch (e) {
+    console.warn('⚠️ userStore 尚未安装，返回游客身份');
+  }
+  let guestId = localStorage.getItem('template_guest_id');
+  if (!guestId) {
+    guestId = `guest-${Date.now()}`;
+    localStorage.setItem('template_guest_id', guestId);
   }
   return {
-    player_id: `guest-${Date.now()}`,
+    player_id: guestId,
     player_name: '游客',
     avatarUrl: "https://images.unsplash.com/photo-1560169573-5ff6f7f35fe4?w=300&h=300&fit=crop&q=85&auto=format"
   };
@@ -58,9 +67,13 @@ export const useTemplateStore = defineStore('template', {
     syncUserData() {
       try {
         const playerData = getUserData();
+        const wasGuest = this.player_id?.startsWith('guest-');
+        const isNowLoggedIn = !playerData.player_id?.startsWith('guest-');
+
         if (playerData.player_id !== this.player_id ||
           playerData.player_name !== this.player_name ||
           playerData.avatarUrl !== this.avatarUrl) {
+          const oldPlayerId = this.player_id;
           this.player_id = playerData.player_id;
           this.player_name = playerData.player_name;
           this.avatarUrl = playerData.avatarUrl;
@@ -68,14 +81,64 @@ export const useTemplateStore = defineStore('template', {
             player_id: this.player_id,
             player_name: this.player_name
           });
+
+          if (wasGuest && isNowLoggedIn && this.room_id) {
+            console.log('🔄 身份从游客变为登录用户，重新连接WebSocket...');
+            this.reconnectWithNewIdentity(oldPlayerId);
+          }
         }
       } catch (error) {
         console.error('❌ 同步用户数据失败:', error);
       }
     },
 
+    async reconnectWithNewIdentity(oldPlayerId) {
+      try {
+        const playerData = getUserData();
+        const gameType = 'o999Template';
+
+        closeTemplateSocket();
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        connectTemplateSocket((data) => {
+          this.handleMessage(data);
+        }, this.room_id, playerData, gameType);
+
+        console.log('✅ 已用真实身份重新连接');
+      } catch (error) {
+        console.error('❌ 重新连接失败:', error);
+      }
+    },
+
     initStore() {
-      this.syncUserData();
+      const userStore = useUserStore();
+
+      if (userStore && userStore.$subscribe) {
+        userStore.$subscribe(() => {
+          this.syncUserData();
+        });
+      }
+
+      if (!userStore.isLoggedIn) {
+        return new Promise(resolve => {
+          const checkInterval = setInterval(() => {
+            if (userStore.isLoggedIn) {
+              clearInterval(checkInterval);
+              this.syncUserData();
+              resolve();
+            }
+          }, 100);
+
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            this.syncUserData();
+            resolve();
+          }, 3000);
+        });
+      } else {
+        this.syncUserData();
+      }
     },
 
     async createRoom() {
@@ -86,7 +149,7 @@ export const useTemplateStore = defineStore('template', {
         this.syncUserData();
         const playerData = getUserData();
         const gameType = 'o999Template';
-        
+
         const response = await axios.get(`${import.meta.env.VITE_URL}/api/new-room-id-short/${gameType}`);
         const roomId = response.data.room_id;
         console.log('🏠 创建房间成功:', roomId);
@@ -209,6 +272,26 @@ export const useTemplateStore = defineStore('template', {
     },
 
     handleGameState(data) {
+      if (data.players) {
+        this.players = data.players;
+      }
+
+      const userStore = useUserStore();
+      if (userStore.isLoggedIn && userStore.user && data.players) {
+        const realPlayerId = String(userStore.user.id);
+        if (data.players[realPlayerId] && this.player_id?.startsWith('guest-')) {
+          console.log(`🔄 检测到身份不匹配，从游客更新为真实用户: ${this.player_id} → ${realPlayerId}`);
+          const oldPlayerId = this.player_id;
+          this.player_id = realPlayerId;
+          this.player_name = userStore.user.username || '用户';
+          this.avatarUrl = userStore.user.avatar || this.avatarUrl;
+
+          if (this.room_id) {
+            this.reconnectWithNewIdentity(oldPlayerId);
+          }
+        }
+      }
+
       this.gameState = {
         state: data.state,
         current_player: data.current_player,

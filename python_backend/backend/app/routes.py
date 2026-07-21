@@ -90,6 +90,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, game_type: str)
                     print(f"断开连接时出错: {disconnect_error}")
     except Exception as e:
         print(f"WebSocket错误: {e}")
+        import traceback
+        print(f"WebSocket错误: {e}")
+        print("完整堆栈:")
+        traceback.print_exc() 
         if room and player:
             try:
                 await room.disconnect(websocket)
@@ -109,7 +113,11 @@ async def get_rooms(game_type: str):
             "players": list(room.game.players.values()),
             "maxPlayers": room.game.config["max_players"],
             "status": room.status,
-            "name": room.name
+            "name": room.name,
+            "deckPreset": getattr(room.game, "game_rules", {}).get("deck_preset", "base"),
+            "deckSpec": getattr(room.game, "game_rules", {}).get("deck_spec", {}),
+            "deckSummary": (room.game.deck_spec.summary()
+                            if hasattr(room.game, "deck_spec") else "")
         })
     return {"rooms": result}
 

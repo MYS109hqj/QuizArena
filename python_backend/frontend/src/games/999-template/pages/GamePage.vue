@@ -40,7 +40,7 @@
       <button @click="handleExit" class="exit-btn">退出游戏</button>
       <h1>回合制模板游戏</h1>
       <div class="status-indicator">
-        {{ isCurrentPlayer ? '轮到你了' : '等待其他玩家' }}
+        {{ isCurrentPlayer ? '轮到你了' : `等待 ${getPlayerName(store.gameState.current_player)}` }}
       </div>
     </header>
 

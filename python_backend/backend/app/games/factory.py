@@ -3,6 +3,7 @@ from .quiz_game import QuizGame
 from app.games.o2_SamePatternHunt.game import o2SPHGame
 from app.games.o3_MemorialBanquet.game import o3MBGame
 from app.games.o999_Template.game import o999TemplateGame
+from app.games.o4_Flip7.game import o4Flip7Game
 
 class GameFactory:
     """游戏工厂，创建不同类型的游戏实例"""
@@ -16,5 +17,7 @@ class GameFactory:
             return o3MBGame(room_id)
         elif game_type == "o999Template":
             return o999TemplateGame(room_id)
+        elif game_type == "o4Flip7":
+            return o4Flip7Game(room_id)
         else:
             raise ValueError(f"不支持的游戏类型: {game_type}")

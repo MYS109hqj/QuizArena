@@ -28,6 +28,42 @@ class o999TemplateGame(RoundBaseGame):
             "actionLockEnabled": True
         }
 
+        self.persistent_players: Dict[str, Player] = {}
+
+    async def connect(self, websocket: WebSocket, player: Player):
+        is_reconnect = player.id in self.persistent_players
+
+        self.connections[websocket] = player.id
+
+        if not is_reconnect:
+            self.persistent_players[player.id] = player
+            await self.broadcast({
+                "type": "player_joined",
+                "player": {
+                    "id": player.id,
+                    "name": player.name,
+                    "avatar": player.avatar
+                }
+            })
+        else:
+            await self.broadcast({
+                "type": "player_reconnected",
+                "player": {
+                    "id": player.id,
+                    "name": player.name,
+                    "avatar": player.avatar
+                }
+            })
+            await self.broadcast_game_state()
+
+    async def disconnect(self, websocket: WebSocket):
+        player_id = self.connections.pop(websocket, None)
+        if player_id:
+            await self.broadcast({
+                "type": "player_disconnected",
+                "player_id": player_id
+            })
+
     async def handle_event(self, websocket, event, player_id):
         if event is None:
             await self.broadcast_to_player(player_id, {"type": "error", "msg": "无效事件"})
@@ -41,6 +77,7 @@ class o999TemplateGame(RoundBaseGame):
             action = event.get("action")
             await self.handle_player_action(player_id, action)
 
+
     async def update_rules(self, settings):
         if "rules" in settings:
             self.game_rules.update(settings["rules"])
@@ -50,11 +87,12 @@ class o999TemplateGame(RoundBaseGame):
             })
 
     async def start_game(self, mode="single", total_rounds=1):
-        await super().start_game(mode, self.target_score)
+        self.player_order = list(self.persistent_players.keys())
         self.total_score = 0
         self.scores = {pid: 0 for pid in self.player_order}
         self.locked = False
-        
+        await super().start_game(mode, total_rounds)
+        await self.broadcast_game_state()
 
     async def process_action(self, player_id, action):
         if action is None:
@@ -87,5 +125,20 @@ class o999TemplateGame(RoundBaseGame):
             "total_rounds": self.total_rounds,
             "total_score": self.total_score,
             "target_score": self.target_score,
-            "player_scores": self.scores
+            "player_scores": self.scores,
+            "players": {
+                pid: {
+                    "id": p.id,
+                    "name": p.name,
+                    "avatar": p.avatar,
+                    "connected": any(c == pid for c in self.connections.values())
+                } for pid, p in self.persistent_players.items()
+            }
         })
+
+    def _init_player_order(self) -> List[str]:
+        ids = [pid for pid in self.persistent_players]
+        if self.mode == "double" and len(ids) >= 2:
+            import random
+            random.shuffle(ids)
+        return ids
