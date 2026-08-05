@@ -18,6 +18,7 @@ from .domain.deck_spec import (DeckSpec, DeckSpecError, official_base_spec,
                                official_vengeance_spec)
 from .domain.probability import next_draw_bust_probability
 from .domain.scoring import score_hand
+from .domain.strategies import build_strategy
 
 
 class o4Flip7Game(RoundBaseGame):
@@ -56,6 +57,10 @@ class o4Flip7Game(RoundBaseGame):
         self.dealing_initial = False
         self.round_end_delay = 3.0
         self.round_ending = False
+        self.bot_configs: Dict[str, Dict[str, Any]] = {}
+        self.bot_runner_task: Optional[asyncio.Task] = None
+        self.player_strategies: Dict[str, Dict[str, Any]] = {}
+        self.autoplay_players: set[str] = set()
 
     async def connect(self, websocket: WebSocket, player: Player):
         reconnecting = player.id in self.persistent_players
@@ -177,8 +182,54 @@ class o4Flip7Game(RoundBaseGame):
             return await self._error(player_id, "无效事件")
         if event.get("type") == "update_rules":
             await self.update_rules(event)
+        elif event.get("type") == "save_player_strategy":
+            await self._save_player_strategy(player_id, event.get("strategy") or {})
+        elif event.get("type") == "set_strategy_autoplay":
+            await self._set_strategy_autoplay(player_id, bool(event.get("enabled")))
         elif event.get("type") == "action":
             await self.handle_player_action(player_id, event.get("action"), event.get("data") or {})
+
+    @staticmethod
+    def _validated_player_strategy(raw: Dict[str, Any]) -> Dict[str, Any]:
+        target_policy = raw.get("base_target_policy", "manual")
+        if target_policy not in {"manual", "random", "realtime_score"}:
+            target_policy = "manual"
+        def optional_number(key: str, default: float, minimum: float,
+                            maximum: float) -> float:
+            try:
+                return min(maximum, max(minimum, float(raw.get(key, default))))
+            except (TypeError, ValueError):
+                return default
+        return {
+            "version": 1,
+            "name": str(raw.get("name") or "我的策略")[:40],
+            "draw_while_has_second_chance": bool(
+                raw.get("draw_while_has_second_chance", True)),
+            "stop_score": int(optional_number("stop_score", 20, 0, 10000)),
+            "stop_bust_probability": optional_number(
+                "stop_bust_probability", .25, 0, 1),
+            "draw_until_distinct_numbers": int(optional_number(
+                "draw_until_distinct_numbers", 0, 0, 7)),
+            "base_target_policy": target_policy,
+        }
+
+    async def _save_player_strategy(self, player_id: str, raw: Dict[str, Any]) -> None:
+        strategy = self._validated_player_strategy(raw)
+        self.player_strategies[player_id] = strategy
+        await self.broadcast_to_player(player_id, {
+            "type": "player_strategy_saved", "strategy": strategy,
+        })
+        if self.player_order:
+            await self.broadcast_game_state()
+
+    async def _set_strategy_autoplay(self, player_id: str, enabled: bool) -> None:
+        if enabled:
+            if player_id not in self.player_strategies:
+                self.player_strategies[player_id] = self._validated_player_strategy({})
+            self.autoplay_players.add(player_id)
+        else:
+            self.autoplay_players.discard(player_id)
+        await self.broadcast_game_state()
 
     async def update_rules(self, settings):
         rules = settings.get("rules", settings)
@@ -248,6 +299,8 @@ class o4Flip7Game(RoundBaseGame):
             if not self.discard_pile:
                 return None
             self.deck, self.discard_pile = self.discard_pile, []
+            for card in self.deck:
+                card.face_down = False
             self.rng.shuffle(self.deck)
         return self.deck.pop()
 
@@ -285,6 +338,19 @@ class o4Flip7Game(RoundBaseGame):
         # had their visit. Forced draws are handled above and remain together.
         await self._advance_turn()
 
+    @staticmethod
+    def _has_second_chance(state: Dict[str, Any]) -> bool:
+        return any(card.name == "Second Chance" and not card.face_down
+                   for card in state["hand"])
+
+    def _consume_second_chance(self, state: Dict[str, Any]) -> None:
+        card = next((card for card in state["hand"]
+                     if card.name == "Second Chance" and not card.face_down), None)
+        if card:
+            state["hand"].remove(card)
+            self.discard_pile.append(card)
+        state["second_chance"] = False
+
     async def _accept_card(self, pid: str, card: Flip7Card, defer_action=False) -> Dict[str, Any]:
         state = self.player_state[pid]
         result = {"bust": False, "used_sc": False, "flip7": False}
@@ -299,8 +365,8 @@ class o4Flip7Game(RoundBaseGame):
                 )
                 duplicate_limit = 2 if card.value == 13 and has_lucky_13 else 1
                 if len(same) >= duplicate_limit:
-                    if state["second_chance"]:
-                        state["second_chance"] = False
+                    if self._has_second_chance(state):
+                        self._consume_second_chance(state)
                         self.discard_pile.append(card)
                         result["used_sc"] = True
                         return result
@@ -335,7 +401,7 @@ class o4Flip7Game(RoundBaseGame):
             # Second Chance is the exception inside Flip 3: the first copy is
             # acquired immediately and can protect against a later card in the
             # same forced sequence. Extra copies still require reassignment.
-            if card.name == "Second Chance" and not state["second_chance"]:
+            if card.name == "Second Chance" and not self._has_second_chance(state):
                 state["second_chance"] = True
                 state["hand"].append(card)
             else:
@@ -373,7 +439,7 @@ class o4Flip7Game(RoundBaseGame):
         actor, card = effect["actor"], effect["card"]
         if card.name == "Second Chance":
             targets = [p for p in self._eligible_targets(card)
-                       if not self.player_state[p]["second_chance"]]
+                       if not self._has_second_chance(self.player_state[p])]
         else:
             targets = self._eligible_targets(card)
         if card.name in ("Steal",):
@@ -526,6 +592,16 @@ class o4Flip7Game(RoundBaseGame):
     def _sync_forced_draw(self) -> None:
         self.forced_draw = self.forced_stack[-1] if self.forced_stack else None
 
+    def _public_forced_draw(self) -> Dict[str, Any]:
+        if not self.forced_draw:
+            return {"active": False}
+        # Deferred effects contain Flip7Card domain objects and must never leak
+        # into the JSON websocket payload.
+        return {
+            key: value for key, value in self.forced_draw.items()
+            if key != "effects"
+        }
+
     async def _continue_effect_resolution(self) -> None:
         """Resolve forced-draw frames depth-first and preserve parent effects."""
         while self.forced_stack and not self.pending_action:
@@ -623,7 +699,7 @@ class o4Flip7Game(RoundBaseGame):
     def _refresh_special_flags(self, pid: str) -> None:
         state = self.player_state[pid]
         state["must_hit"] = any(c.ability == "zero" for c in state["hand"])
-        state["second_chance"] = any(c.name == "Second Chance" for c in state["hand"])
+        state["second_chance"] = self._has_second_chance(state)
 
     def _discard_hand(self, state: Dict[str, Any]) -> None:
         self.discard_pile.extend(state["hand"])
@@ -687,7 +763,7 @@ class o4Flip7Game(RoundBaseGame):
         numbers = {c.value for c in state["hand"] if c.card_type == "number"}
         return {
             "score": state["score"], "round_score": self._score_hand(state),
-            "flip7_count": len(numbers), "second_chances": int(state["second_chance"]),
+            "flip7_count": len(numbers), "second_chances": int(self._has_second_chance(state)),
             "frozen": state["frozen"], "stopped": state["stopped"],
             "busted": state["busted"], "face_down": state["busted"],
             "active": not (state["busted"] or state["stopped"]),
@@ -700,6 +776,150 @@ class o4Flip7Game(RoundBaseGame):
         # It does not simulate Flip X and does not consume Second Chance.
         source = self.deck if self.deck else self.discard_pile
         return next_draw_bust_probability(self.player_state[player_id]["hand"], source)
+
+    def _bot_threat_target(self, candidates: List[str]) -> str:
+        """Target the live leader; break equal-score ties with the seeded RNG."""
+        scores = {
+            pid: self.player_state[pid]["score"] + self._score_hand(self.player_state[pid])
+            for pid in candidates
+        }
+        highest = max(scores.values())
+        tied = [pid for pid in candidates if scores[pid] == highest]
+        return self.rng.choice(tied)
+
+    def _lowest_realtime_target(self, candidates: List[str]) -> str:
+        scores = {
+            pid: self.player_state[pid]["score"] + self._score_hand(self.player_state[pid])
+            for pid in candidates
+        }
+        lowest = min(scores.values())
+        tied = [pid for pid in candidates if scores[pid] == lowest]
+        return self.rng.choice(tied)
+
+    def _bot_selection(self, bot_id: str) -> Dict[str, Any]:
+        action = self.pending_action or {}
+        targets = list(action.get("targets") or [])
+        if not targets:
+            return {}
+        kind = action.get("type")
+        card = action.get("card") or {}
+        opponents = [pid for pid in targets if pid != bot_id]
+        target = targets[0]
+        if kind in {"freeze", "flip3", "flip4", "just_one_more"} and opponents:
+            target = self._bot_threat_target(opponents)
+        elif kind == "modifier":
+            harmful = card.get("value", 0) < 0 or card.get("multiplier") == 0.5
+            target = (self._bot_threat_target(opponents) if harmful and opponents else
+                      bot_id if bot_id in targets else targets[0])
+        elif kind in {"transfer_sc", "brutal_flip7"}:
+            target = bot_id if bot_id in targets else targets[0]
+        if kind in {"steal", "discard"}:
+            candidates = [pid for pid in targets
+                          if any(not c.face_down for c in self.player_state[pid]["hand"])]
+            if candidates:
+                opposing = [pid for pid in candidates if pid != bot_id]
+                target = self._bot_threat_target(opposing or candidates)
+                face_up = [c for c in self.player_state[target]["hand"] if not c.face_down]
+                selected = self.rng.choice(face_up)
+                return {"target_id": target, "card_id": selected.id}
+        if kind == "swap":
+            usable = [pid for pid in targets
+                      if any(not c.face_down for c in self.player_state[pid]["hand"])]
+            if len(usable) >= 2:
+                opposing = [pid for pid in usable if pid != bot_id]
+                first = self._bot_threat_target(opposing or usable)
+                second = self.rng.choice([pid for pid in usable if pid != first])
+                first_card = self.rng.choice(
+                    [c for c in self.player_state[first]["hand"] if not c.face_down])
+                second_card = self.rng.choice(
+                    [c for c in self.player_state[second]["hand"] if not c.face_down])
+                return {"target_id": first, "card_id": first_card.id,
+                        "second_target_id": second, "second_card_id": second_card.id}
+        return {"target_id": target}
+
+    def _manual_effect_required(self, actor: str) -> bool:
+        if actor in self.bot_configs or not self.pending_action:
+            return False
+        if actor not in self.autoplay_players:
+            return True
+        strategy = self.player_strategies.get(actor) or self._validated_player_strategy({})
+        if self.game_rules.get("deck_preset") != "base":
+            return True
+        return strategy["base_target_policy"] == "manual"
+
+    def _player_auto_selection(self, actor: str) -> Dict[str, Any]:
+        action = self.pending_action or {}
+        targets = list(action.get("targets") or [])
+        if not targets:
+            return {}
+        strategy = self.player_strategies[actor]
+        policy = strategy["base_target_policy"]
+        if policy == "random":
+            target = self.rng.choice(targets)
+        elif action.get("type") == "transfer_sc":
+            # Second Chance is purely beneficial: help the lowest-scoring
+            # eligible player, never the leader.
+            target = self._lowest_realtime_target(targets)
+        else:
+            opponents = [pid for pid in targets if pid != actor]
+            target = self._bot_threat_target(opponents or targets)
+        return {"target_id": target}
+
+    def _player_strategy_action(self, actor: str) -> str:
+        state = self.player_state[actor]
+        strategy = self.player_strategies[actor]
+        if state["must_hit"] or self.forced_stack:
+            return "draw"
+        if self._has_second_chance(state) and strategy["draw_while_has_second_chance"]:
+            return "draw"
+        distinct = len({c.value for c in state["hand"]
+                        if c.card_type == "number" and not c.face_down})
+        if distinct < strategy["draw_until_distinct_numbers"]:
+            return "draw"
+        if self._probability_for(actor)["probability"] > strategy["stop_bust_probability"]:
+            return "stop"
+        if self._score_hand(state) >= strategy["stop_score"]:
+            return "stop"
+        return "draw"
+
+    def _is_automated(self, actor: Optional[str]) -> bool:
+        return bool(actor and (actor in self.bot_configs or actor in self.autoplay_players))
+
+    async def _run_bots(self) -> None:
+        try:
+            while self.state == "player_turn":
+                actor = ((self.pending_action or {}).get("actor")
+                         if self.pending_action else self.current_player)
+                if not self._is_automated(actor) or self._manual_effect_required(actor):
+                    break
+                await asyncio.sleep(0.35)
+                if not self._is_automated(actor) or self._manual_effect_required(actor):
+                    break
+                if self.pending_action:
+                    selection = (self._bot_selection(actor) if actor in self.bot_configs
+                                 else self._player_auto_selection(actor))
+                    await self._resolve_selection(actor, selection)
+                    continue
+                state = self.player_state[actor]
+                if actor in self.bot_configs:
+                    probability = self._probability_for(actor)["probability"]
+                    strategy = build_strategy(self.bot_configs[actor])
+                    choice = "draw" if self._has_second_chance(state) else strategy.choose_turn(
+                        round_score=self._score_hand(state), bust_probability=probability,
+                        must_hit=state["must_hit"] or bool(self.forced_stack), rng=self.rng)
+                else:
+                    choice = self._player_strategy_action(actor)
+                await self.handle_player_action(actor, choice, {})
+        finally:
+            self.bot_runner_task = None
+
+    def _schedule_bot(self) -> None:
+        actor = ((self.pending_action or {}).get("actor")
+                 if self.pending_action else self.current_player)
+        if (self.state == "player_turn" and self._is_automated(actor)
+                and not self._manual_effect_required(actor)
+                and (self.bot_runner_task is None or self.bot_runner_task.done())):
+            self.bot_runner_task = asyncio.create_task(self._run_bots())
 
     async def broadcast_game_state(self):
         if not self.player_order:
@@ -715,13 +935,30 @@ class o4Flip7Game(RoundBaseGame):
             "round": self.round, "total_rounds": self.total_rounds,
             "dealer": self.player_order[self.dealer_index],
             "player_states": {p: self._public_player_state(s) for p, s in self.player_state.items()},
-            "pending_action": self.pending_action, "flip3_state": self.forced_draw or {"active": False},
+            "pending_action": self.pending_action, "flip3_state": self._public_forced_draw(),
             "remaining_cards": len(self.deck), "discard_count": len(self.discard_pile),
             "last_round_scores": self.last_round_scores, "rules": self.game_rules,
             "deck_spec": self.deck_spec.public(), "deck_summary": self.deck_spec.summary(),
             "probabilities": probabilities,
+            "autoplay_states": {
+                pid: {
+                    "enabled": pid in self.autoplay_players,
+                    "strategy": self.player_strategies.get(pid),
+                    "paused_for_effect": bool(
+                        self.pending_action
+                        and self.pending_action.get("actor") == pid
+                        and self._manual_effect_required(pid)),
+                    "pending_effect": (
+                        self.pending_action.get("card", {}).get("name")
+                        if self.pending_action and self.pending_action.get("actor") == pid
+                        else None),
+                } for pid in self.player_order if pid not in self.bot_configs
+            },
             "players": {pid: {"id": p.id, "name": p.name, "avatar": p.avatar,
-                                "connected": pid in self.connections.values()}
+                                "connected": pid in self.connections.values(),
+                                "is_bot": pid in self.bot_configs,
+                                "strategy": self.bot_configs.get(pid, {}).get("strategy"),
+                                "strategy_threshold": self.bot_configs.get(pid, {}).get("threshold")}
                         for pid, p in self.persistent_players.items()},
         }
         await self.broadcast(payload)
@@ -731,6 +968,7 @@ class o4Flip7Game(RoundBaseGame):
                     "type": "probability_state",
                     "probabilities": {pid: self._probability_for(pid)},
                 })
+        self._schedule_bot()
 
     async def _error(self, player_id: str, message: str):
         await self.broadcast_to_player(player_id, {"type": "error", "message": message, "msg": message})

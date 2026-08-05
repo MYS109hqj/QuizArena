@@ -1,8 +1,10 @@
 import asyncio
+import json
 
 from app.games.o4_Flip7.game import Flip7Card, o4Flip7Game
 from app.games.o4_Flip7.domain.deck_spec import DeckSpec, DeckSpecError
 from app.games.o4_Flip7.domain.probability import next_draw_bust_probability
+from app.games.o4_Flip7.domain.strategies import build_strategy
 
 
 def game(vengeance=False, brutal=False):
@@ -60,7 +62,8 @@ def test_second_chance_is_consumed_by_duplicate():
     subject = game()
     state = subject.player_state["a"]
     state["second_chance"] = True
-    state["hand"] = [Flip7Card("number", "8", value=8)]
+    state["hand"] = [Flip7Card("number", "8", value=8),
+                     Flip7Card("action", "Second Chance")]
     result = asyncio.run(subject._accept_card("a", Flip7Card("number", "8", value=8)))
     assert result["used_sc"] is True
     assert state["second_chance"] is False
@@ -518,3 +521,218 @@ def test_custom_scoring_applies_numeric_multipliers_before_all_flat_modifiers():
         Flip7Card("modifier", "+10", 10), Flip7Card("modifier", "-2", -2),
     ]
     assert subject._score_hand(subject.player_state["a"]) == 17
+
+
+def test_reshuffled_discard_cards_are_turned_face_up_again():
+    subject = game()
+    subject.deck = []
+    subject.discard_pile = [
+        Flip7Card("number", "5", 5, face_down=True),
+        Flip7Card("modifier", "+4", 4, face_down=True),
+    ]
+    drawn = subject._draw_card()
+    assert drawn.face_down is False
+    assert all(card.face_down is False for card in subject.deck)
+
+
+def test_score_threshold_strategy_stops_at_threshold():
+    strategy = build_strategy({"strategy": "score_threshold", "threshold": 18})
+    assert strategy.choose_turn(round_score=17, bust_probability=.9,
+                                must_hit=False, rng=game().rng) == "draw"
+    assert strategy.choose_turn(round_score=18, bust_probability=0,
+                                must_hit=False, rng=game().rng) == "stop"
+
+
+def test_risk_threshold_strategy_uses_next_draw_probability():
+    strategy = build_strategy({"strategy": "risk_threshold", "threshold": .2})
+    assert strategy.choose_turn(round_score=100, bust_probability=.2,
+                                must_hit=False, rng=game().rng) == "draw"
+    assert strategy.choose_turn(round_score=0, bust_probability=.21,
+                                must_hit=False, rng=game().rng) == "stop"
+    assert strategy.choose_turn(round_score=100, bust_probability=1,
+                                must_hit=True, rng=game().rng) == "draw"
+
+
+def test_bot_can_build_legal_swap_selection():
+    subject = game(vengeance=True)
+    subject.player_order = ["bot-a", "b"]
+    subject.player_state = {pid: subject._blank_player_state() for pid in subject.player_order}
+    subject.player_state["bot-a"]["hand"] = [Flip7Card("number", "3", 3)]
+    subject.player_state["b"]["hand"] = [Flip7Card("modifier", "-4", -4)]
+    subject.pending_action = {
+        "type": "swap", "actor": "bot-a", "targets": ["bot-a", "b"],
+        "card": Flip7Card("action", "Swap").public(),
+    }
+    selection = subject._bot_selection("bot-a")
+    assert selection["target_id"] != selection["second_target_id"]
+    assert selection["card_id"] and selection["second_card_id"]
+
+
+def test_bot_turn_runner_stops_and_advances_to_live_player():
+    subject = game()
+    subject.player_order = ["bot-a", "human"]
+    subject.state = "player_turn"
+    subject.turn_cursor = 0
+    subject.current_player = "bot-a"
+    subject.player_state = {pid: subject._blank_player_state() for pid in subject.player_order}
+    subject.player_state["bot-a"]["hand"] = [Flip7Card("number", "10", 10)]
+    subject.bot_configs["bot-a"] = {"strategy": "score_threshold", "threshold": 10}
+    subject.broadcast = _noop
+    asyncio.run(subject._run_bots())
+    assert subject.player_state["bot-a"]["stopped"] is True
+    assert subject.current_player == "human"
+
+
+def test_bot_harmful_target_prefers_realtime_highest_score():
+    subject = game(vengeance=True)
+    subject.player_order = ["bot-a", "b", "c"]
+    subject.player_state = {pid: subject._blank_player_state() for pid in subject.player_order}
+    subject.player_state["b"]["score"] = 30
+    subject.player_state["c"]["score"] = 20
+    subject.player_state["c"]["hand"] = [Flip7Card("number", "12", 12)]
+    subject.pending_action = {
+        "type": "modifier", "actor": "bot-a", "targets": ["bot-a", "b", "c"],
+        "card": Flip7Card("modifier", "-6", -6).public(),
+    }
+    # c leads in real time: 20 banked + 12 currently exposed > b's 30.
+    assert subject._bot_selection("bot-a")["target_id"] == "c"
+
+
+def test_bot_keeps_drawing_until_second_chance_is_consumed():
+    subject = game()
+    subject.state = "player_turn"
+    subject.player_order = ["bot-a", "human"]
+    subject.turn_cursor = 0
+    subject.current_player = "bot-a"
+    subject.player_state = {pid: subject._blank_player_state() for pid in subject.player_order}
+    subject.player_state["bot-a"]["hand"] = [
+        Flip7Card("number", "10", 10), Flip7Card("action", "Second Chance"),
+    ]
+    subject.player_state["bot-a"]["second_chance"] = True
+    subject.bot_configs["bot-a"] = {"strategy": "score_threshold", "threshold": 0}
+    subject.deck = [Flip7Card("number", "10", 10)]
+    subject.broadcast = _noop
+    asyncio.run(subject._run_bots())
+    assert subject.player_state["bot-a"]["second_chance"] is False
+    assert subject.player_state["bot-a"]["stopped"] is False
+    assert subject.current_player == "human"
+
+
+def test_bot_does_not_stop_at_threshold_while_second_chance_remains():
+    subject = game()
+    subject.state = "player_turn"
+    subject.player_order = ["bot-a", "human"]
+    subject.turn_cursor = 0
+    subject.current_player = "bot-a"
+    subject.player_state = {pid: subject._blank_player_state() for pid in subject.player_order}
+    subject.player_state["bot-a"]["hand"] = [
+        Flip7Card("number", "10", 10), Flip7Card("action", "Second Chance"),
+    ]
+    subject.player_state["bot-a"]["second_chance"] = True
+    subject.bot_configs["bot-a"] = {"strategy": "score_threshold", "threshold": 0}
+    subject.deck = [Flip7Card("number", "2", 2)]
+    subject.broadcast = _noop
+    asyncio.run(subject._run_bots())
+    assert subject._has_second_chance(subject.player_state["bot-a"]) is True
+    assert subject.player_state["bot-a"]["stopped"] is False
+    assert any(card.value == 2 for card in subject.player_state["bot-a"]["hand"])
+
+
+def test_player_strategy_second_chance_overrides_stop_thresholds():
+    subject = game()
+    subject.player_strategies["a"] = subject._validated_player_strategy({
+        "stop_score": 0, "stop_bust_probability": 0,
+        "draw_while_has_second_chance": True,
+    })
+    subject.player_state["a"]["hand"] = [
+        Flip7Card("number", "10", 10), Flip7Card("action", "Second Chance"),
+    ]
+    subject.player_state["a"]["second_chance"] = True
+    subject.deck = [Flip7Card("number", "10", 10)]
+    assert subject._player_strategy_action("a") == "draw"
+    subject._consume_second_chance(subject.player_state["a"])
+    assert subject._player_strategy_action("a") == "stop"
+
+
+def test_player_strategy_realtime_second_chance_targets_lowest_eligible_player():
+    subject = game()
+    subject.player_order = ["a", "b", "c"]
+    subject.player_state = {pid: subject._blank_player_state() for pid in subject.player_order}
+    subject.player_state["a"]["second_chance"] = True
+    subject.player_state["a"]["hand"] = [Flip7Card("action", "Second Chance")]
+    subject.player_state["b"]["score"] = 40
+    subject.player_state["c"]["score"] = 10
+    subject.player_strategies["a"] = subject._validated_player_strategy({
+        "base_target_policy": "realtime_score",
+    })
+    subject.autoplay_players.add("a")
+    subject.pending_action = {
+        "type": "transfer_sc", "actor": "a", "player_id": "a",
+        "targets": ["b", "c"], "card": Flip7Card("action", "Second Chance").public(),
+    }
+    assert subject._player_auto_selection("a")["target_id"] == "c"
+
+
+def test_player_autoplay_pauses_for_manual_or_non_base_target_effects():
+    subject = game()
+    subject.player_strategies["a"] = subject._validated_player_strategy({
+        "base_target_policy": "manual",
+    })
+    subject.autoplay_players.add("a")
+    subject.pending_action = {
+        "type": "flip3", "actor": "a", "targets": ["b"],
+        "card": Flip7Card("action", "Flip 3").public(),
+    }
+    assert subject._manual_effect_required("a") is True
+    subject.player_strategies["a"]["base_target_policy"] = "random"
+    assert subject._manual_effect_required("a") is False
+    subject.game_rules["deck_preset"] = "vengeance"
+    assert subject._manual_effect_required("a") is True
+
+
+def test_player_strategy_is_sanitized():
+    subject = game()
+    strategy = subject._validated_player_strategy({
+        "name": "x" * 100, "stop_score": -3,
+        "stop_bust_probability": 8, "draw_until_distinct_numbers": 99,
+        "base_target_policy": "unsupported",
+    })
+    assert len(strategy["name"]) == 40
+    assert strategy["stop_score"] == 0
+    assert strategy["stop_bust_probability"] == 1
+    assert strategy["draw_until_distinct_numbers"] == 7
+    assert strategy["base_target_policy"] == "manual"
+
+
+def test_vengeance_zero_forces_every_player_strategy_to_draw():
+    subject = game(vengeance=True)
+    subject.player_strategies["a"] = subject._validated_player_strategy({
+        "stop_score": 0, "stop_bust_probability": 0,
+        "draw_while_has_second_chance": False,
+    })
+    zero = Flip7Card("number", "0", 0, ability="zero")
+    asyncio.run(subject._accept_card("a", zero))
+    assert subject.player_state["a"]["must_hit"] is True
+    assert subject._player_strategy_action("a") == "draw"
+
+
+def test_vengeance_zero_plus_six_other_numbers_is_flip7():
+    subject = game(vengeance=True)
+    subject.player_state["a"]["hand"] = [
+        Flip7Card("number", str(value), value) for value in range(1, 7)
+    ]
+    result = asyncio.run(subject._accept_card(
+        "a", Flip7Card("number", "0", 0, ability="zero")))
+    assert result["flip7"] is True
+    assert subject.player_state["a"]["has_flip7"] is True
+
+
+def test_forced_draw_public_state_never_contains_card_objects():
+    subject = game(vengeance=True)
+    subject.forced_draw = {
+        "active": True, "kind": "flip4", "target": "a", "remaining": 2,
+        "effects": [{"actor": "a", "card": Flip7Card("action", "Swap")}],
+    }
+    public = subject._public_forced_draw()
+    assert "effects" not in public
+    json.dumps(public)

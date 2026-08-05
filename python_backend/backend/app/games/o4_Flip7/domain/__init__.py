@@ -5,3 +5,6 @@ from .scoring import score_hand
 
 __all__ = ["Flip7Card", "DeckSpec", "DeckSpecError", "official_base_spec",
            "official_vengeance_spec", "next_draw_bust_probability", "score_hand"]
+from .strategies import build_strategy
+
+__all__ = ["build_strategy"]

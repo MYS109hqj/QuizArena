@@ -12,7 +12,8 @@ const defaultRules = () => ({ deck_preset: 'base', deck_spec: defaultDeckSpec(),
   probability_enabled: false, probability_visibility: 'all', random_seed: null });
 const defaultGameState = () => ({ state: 'waiting', current_player: null, round: 1,
   player_states: {}, pending_action: null, flip3_state: { active: false },
-  remaining_cards: 94, discard_count: 0, rules: defaultRules(), probabilities: {} });
+  remaining_cards: 94, discard_count: 0, rules: defaultRules(), probabilities: {},
+  autoplay_states: {} });
 
 function userData() {
   const users = useUserStore();
@@ -30,7 +31,7 @@ export const useFlip7Store = defineStore('flip7', {
     rooms: [], creatingRoom: false, connected: false,
     player_id: '', player_name: '', avatarUrl: '', room_id: null,
     room: {}, players: {}, gameStatus: 'waiting', gameState: defaultGameState(),
-    roundHistory: [], lastCard: null,
+    roundHistory: [], lastCard: null, notice: null,
   }),
   actions: {
     initStore() { Object.assign(this, userData()); },
@@ -62,6 +63,14 @@ export const useFlip7Store = defineStore('flip7', {
     toggleReady() { sendFlip7Message({ type: 'toggle_ready' }); },
     drawCard() { sendFlip7Message({ type: 'action', action: 'draw' }); },
     stopTurn() { sendFlip7Message({ type: 'action', action: 'stop' }); },
+    savePlayerStrategy(strategy) {
+      sendFlip7Message({ type: 'save_player_strategy', strategy });
+    },
+    setStrategyAutoplay(enabled) {
+      sendFlip7Message({ type: 'set_strategy_autoplay', enabled });
+    },
+    addBot(config) { sendFlip7Message({ type: 'add_bot', config }); },
+    removeBot(botId) { sendFlip7Message({ type: 'remove_bot', bot_id: botId }); },
     selectTarget(targetId, cardId = null, ownCardId = null, secondTargetId = null, secondCardId = null) {
       sendFlip7Message({ type: 'action', action: 'select_target', data: {
         target_id: targetId, card_id: cardId, own_card_id: ownCardId,
@@ -78,6 +87,7 @@ export const useFlip7Store = defineStore('flip7', {
         this.room = data;
         this.players = data.players || {};
         if (data.rules) this.gameState.rules = data.rules;
+        if (data.error) this.showNotice(data.error, 'error');
         this.gameStatus = data.status === 'playing' ? 'playing' : 'waiting';
       } else if (data.type === 'player_list') {
         this.players = Object.fromEntries((data.players || []).map(p => [p.id, p]));
@@ -93,15 +103,38 @@ export const useFlip7Store = defineStore('flip7', {
         this.gameState.pending_action = data.action;
       } else if (data.type === 'probability_state') {
         this.gameState.probabilities = { ...this.gameState.probabilities, ...(data.probabilities || {}) };
+      } else if (data.type === 'player_strategy_saved') {
+        const previous = this.gameState.autoplay_states?.[this.player_id] || {};
+        this.gameState.autoplay_states = {
+          ...this.gameState.autoplay_states,
+          [this.player_id]: { ...previous, strategy: data.strategy },
+        };
+        this.showNotice('策略已保存');
       } else if (data.type === 'rules_updated' || data.type === 'settings_updated') {
         if (data.rules) this.gameState.rules = data.rules;
       } else if (data.type === 'game_finished') {
         this.gameState.state = 'finished'; this.gameStatus = 'finished';
       } else if (data.type === 'error' || data.type === 'rules_error') {
-        console.error(data.message || data.msg);
+        this.showNotice(data.message || data.msg || '操作失败', 'error');
       }
     },
-    getPlayerName(id) { return this.players[id]?.name || id; },
+    showNotice(message, kind = 'info') {
+      const token = Date.now();
+      this.notice = { message, kind, token };
+      setTimeout(() => { if (this.notice?.token === token) this.notice = null; }, 3500);
+    },
+    getPlayerName(id) {
+      const player = this.players[id];
+      if (!player) return id;
+      if (!player.is_bot) return player.name;
+      const threshold = Number(player.strategy_threshold);
+      const suffix = player.strategy === 'score_threshold'
+        ? `分数阈值 ${threshold}分`
+        : player.strategy === 'risk_threshold'
+          ? `概率阈值 ${(threshold * 100).toFixed(0)}%`
+          : '随机策略';
+      return `${player.name}（${suffix}）`;
+    },
     resetStore() { this.leaveRoom(); this.rooms = []; },
   }
 });

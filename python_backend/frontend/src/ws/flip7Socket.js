@@ -19,20 +19,24 @@ export function connectFlip7Socket(onMessage, roomId, playerInfo, gameType = 'o4
   closeFlip7Socket();
   manualClose = false;
   connectionArgs = { onMessage, roomId, playerInfo, gameType };
-  socket = new WebSocket(websocketUrl(roomId, gameType));
-  socket.onopen = () => {
+  const ws = new WebSocket(websocketUrl(roomId, gameType));
+  socket = ws;
+  ws.onopen = () => {
+    if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
     attempts = 0;
     isConnected.value = true;
     connectionError.value = null;
-    socket.send(JSON.stringify({ id: playerInfo.player_id, name: playerInfo.player_name,
+    ws.send(JSON.stringify({ id: playerInfo.player_id, name: playerInfo.player_name,
       avatar: playerInfo.avatarUrl }));
   };
-  socket.onmessage = event => {
+  ws.onmessage = event => {
+    if (socket !== ws) return;
     try { onMessage?.(JSON.parse(event.data)); }
     catch (error) { console.error('Flip 7 消息解析失败', error); }
   };
-  socket.onerror = error => { connectionError.value = error; };
-  socket.onclose = () => {
+  ws.onerror = error => { if (socket === ws) connectionError.value = error; };
+  ws.onclose = () => {
+    if (socket !== ws) return;
     isConnected.value = false;
     socket = null;
     if (!manualClose && connectionArgs && attempts < 5) {

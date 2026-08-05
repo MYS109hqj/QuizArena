@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Callable, Any
 from fastapi import WebSocket
 from .games.base import BaseGame
 from .models.player import Player
+import uuid
 
 class Room:
     def __init__(self, room_id: str, game: BaseGame, owner_info: Optional[Dict[str, Any]] = None, name: str = "",gameType:str = ""):
@@ -54,6 +55,16 @@ class Room:
         print("251102quiz问答游戏debug",message) 
         if not player_id:
             return
+        if message_type in {"save_player_strategy", "set_strategy_autoplay"}:
+            return await self.game.handle_event(websocket, message, player_id)
+        if (self.status == "waiting" and hasattr(self.game, "bot_configs")
+                and player_id == self.owner["id"]
+                and message_type == "add_bot"):
+            return await self.add_bot(message.get("config") or {})
+        if (self.status == "waiting" and hasattr(self.game, "bot_configs")
+                and player_id == self.owner["id"]
+                and message_type == "remove_bot"):
+            return await self.remove_bot(str(message.get("bot_id") or ""))
         
         if self.gameType == "quiz":
             await self.game.handle_event(websocket, message, player_id)
@@ -121,6 +132,31 @@ class Room:
         # 检查所有非房主玩家是否都已准备
         return all(p_id in self.ready_players for p_id in non_owner_players)
 
+    async def add_bot(self, config: Dict[str, Any]) -> None:
+        if len(self.players) >= self.game.config.get("max_players", 18):
+            return await self.broadcast_state(extra_message={"error": "房间人数已满"})
+        strategy = config.get("strategy", "random")
+        if strategy not in {"random", "score_threshold", "risk_threshold"}:
+            strategy = "random"
+        threshold = config.get("threshold", 20 if strategy == "score_threshold" else .25)
+        bot_id = f"bot-{uuid.uuid4().hex[:8]}"
+        number = 1 + sum(pid.startswith("bot-") for pid in self.players)
+        bot = Player(bot_id, str(config.get("name") or f"机器人 {number}")[:24], "")
+        self.players[bot_id] = bot
+        self.ready_players.add(bot_id)
+        self.game.persistent_players[bot_id] = bot
+        self.game.bot_configs[bot_id] = {"strategy": strategy, "threshold": threshold}
+        await self.broadcast_state()
+
+    async def remove_bot(self, bot_id: str) -> None:
+        if bot_id not in getattr(self.game, "bot_configs", {}):
+            return
+        self.game.bot_configs.pop(bot_id, None)
+        self.game.persistent_players.pop(bot_id, None)
+        self.players.pop(bot_id, None)
+        self.ready_players.discard(bot_id)
+        await self.broadcast_state()
+
     async def start_game(self,mode:str):
         """开始游戏"""
         self.status = "playing"
@@ -179,7 +215,10 @@ class Room:
                     "id": p.id,
                     "name": p.name,
                     "avatar": p.avatar,
-                    "ready": p_id in self.ready_players
+                    "ready": p_id in self.ready_players,
+                    "is_bot": p_id in getattr(self.game, "bot_configs", {}),
+                    "strategy": getattr(self.game, "bot_configs", {}).get(p_id, {}).get("strategy"),
+                    "strategy_threshold": getattr(self.game, "bot_configs", {}).get(p_id, {}).get("threshold")
                 } for p_id, p in self.players.items()
             },
             "player_count": len(self.players),
@@ -190,6 +229,8 @@ class Room:
             "deck_summary": (self.game.deck_spec.summary()
                              if hasattr(self.game, "deck_spec") else "")
         }
+        if extra_message:
+            room_state.update(extra_message)
         
         # 使用字典键的副本进行遍历，避免并发修改问题
         disconnected_websockets = []
