@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-// 从环境变量获取服务器URL
-const API_BASE_URL = import.meta.env.VITE_URL || 'http://localhost:8000';
+// 从环境变量获取服务器URL；生产环境未设置时走 nginx 相对路径
+const API_BASE_URL = import.meta.env.VITE_URL || '';
 
 export const useUserStore = defineStore('user', () => {
   const user = ref(null)
@@ -16,7 +16,7 @@ export const useUserStore = defineStore('user', () => {
       const response = await fetch(`${API_BASE_URL}/auth/verify-token`, {
         credentials: 'include'  // 关键：允许发送cookie
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         if (data.valid) {
@@ -37,11 +37,11 @@ export const useUserStore = defineStore('user', () => {
       const response = await fetch(`${API_BASE_URL}/auth/verify-token`, {
         credentials: 'include'  // 允许发送cookie
       })
-      
+
       if (!response.ok) {
         throw new Error('Token验证失败')
       }
-      
+
       const data = await response.json()
       if (data.valid) {
         // 获取用户信息
@@ -61,7 +61,7 @@ export const useUserStore = defineStore('user', () => {
       const response = await fetch(`${API_BASE_URL}/auth/profile`, {
         credentials: 'include'  // 允许发送cookie
       })
-      
+
       if (response.ok) {
         user.value = await response.json()
         isLoggedIn.value = true
@@ -78,9 +78,9 @@ export const useUserStore = defineStore('user', () => {
       if (!isLoggedIn.value) {
         throw new Error('用户未登录')
       }
-      
+
       console.log('更新用户资料:', profileData)
-      
+
       // 调用后端API更新用户资料
       const response = await fetch(`${API_BASE_URL}/auth/profile`, {
         method: 'PUT',
@@ -90,18 +90,18 @@ export const useUserStore = defineStore('user', () => {
         credentials: 'include',  // 允许发送cookie
         body: JSON.stringify(profileData)
       })
-      
+
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.detail || '更新失败')
       }
-      
+
       // 获取更新后的用户信息
       const updatedUser = await response.json()
-      
+
       // 更新本地用户信息
       user.value = updatedUser
-      
+
       console.log('用户资料更新成功（服务器存储）')
       return { success: true, message: '资料更新成功' }
     } catch (error) {
@@ -121,18 +121,18 @@ export const useUserStore = defineStore('user', () => {
         credentials: 'include',  // 允许接收和发送cookie
         body: JSON.stringify(credentials)
       })
-      
+
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.detail || '登录失败')
       }
-      
+
       const data = await response.json()
       user.value = data.user
       isLoggedIn.value = true
-      
+
       // 不再需要手动保存token到localStorage，cookie由后端设置
-      
+
       return data
     } catch (error) {
       throw error
@@ -150,12 +150,12 @@ export const useUserStore = defineStore('user', () => {
         credentials: 'include',  // 允许接收和发送cookie
         body: JSON.stringify(userData)
       })
-      
+
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.detail || '注册失败')
       }
-      
+
       return await response.json()
     } catch (error) {
       throw error

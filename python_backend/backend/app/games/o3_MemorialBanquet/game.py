@@ -17,6 +17,15 @@ class o3MBGame(RoundBaseGame):
     def __init__(self, room_id: str):
         super().__init__(room_id)
         self.scores: Dict[str, int] = {}  # playerId -> score
+        self.action_timeout_seconds = 60
+        self.timeout_counts: Dict[str, int] = {}
+        self.managed_players: set[str] = set()
+        self.decision_task = None
+        self.decision = None
+        self.decision_sequence = 0
+        self.phase = "waiting"
+        self.placement_hands: Dict[str, List[int]] = {}
+        self.placement_placed: set[str] = set()
         self.error_counts: Dict[str, int] = {}  # playerId -> 错误次数
         self.locked: bool = False
         self.config: Dict[str, Any] = {
@@ -30,6 +39,7 @@ class o3MBGame(RoundBaseGame):
         self.achievement_observer = SPHGameObserver(self)
         
         self.game_rules = {
+            "manual_placement": False,
             "allowSimultaneousActions": True,
             "flipRestrictions": {
                 "preventFlipDuringAnimation": True,
@@ -49,10 +59,28 @@ class o3MBGame(RoundBaseGame):
         self.preview_duration = 10  # 预览时长30秒
         self.pending_upgrade = None  # 待升级的卡牌对
 
+    async def connect(self, websocket, player):
+        # Handle the refresh race where the replacement socket connects before
+        # the old socket's disconnect event marks the player offline.
+        sync_after_connect = (
+            player.id not in self.disconnected_players
+            and player.id in self.scores
+            and bool(self.cards)
+        )
+        await super().connect(websocket, player)
+        if sync_after_connect:
+            await self.on_player_reconnect(player.id)
+
     async def handle_event(self, websocket, event, player_id):
         print(f"📥 收到事件: {event}, 玩家: {player_id}")
         if event is None:
             await self.broadcast_to_player(player_id, {"type": "error", "msg": "无效事件"})
+            return
+        if event.get("type") == "cancel_system_managed":
+            self.managed_players.discard(player_id)
+            self.timeout_counts[player_id] = 0
+            self._complete_decision()
+            await self.broadcast_game_state()
             return
         
         # 处理规则更新请求
@@ -73,17 +101,17 @@ class o3MBGame(RoundBaseGame):
 
     async def update_rules(self, settings):
         """更新游戏规则"""
-        if "rules" in settings:
-            self.game_rules.update(settings["rules"])
-            
-            await self.broadcast({
-                "type": "rules_updated",
-                "rules": self.game_rules
-            })
+        rules = settings.get("rules", settings)
+        self.game_rules.update(rules)
+        await self.broadcast({
+            "type": "rules_updated",
+            "rules": self.game_rules
+        })
 
     async def start_game(self, mode="single", total_rounds=1):
         await super().start_game(mode, total_rounds)
-        self.cards = self._init_cards()
+        manual_placement = bool(self.game_rules.get("manual_placement"))
+        self.cards = self._init_cards(randomize=not manual_placement)
 
         # 不需要重新初始化 player_order，因为 super().start_game 已经初始化了
         # self.player_order = self._init_player_order()
@@ -98,12 +126,27 @@ class o3MBGame(RoundBaseGame):
         
         self.current_flip_cards = []
         
-        self.start_time = datetime.utcnow()
+        self.start_time = None if manual_placement else datetime.utcnow()
         
         self.global_flipping_cards = {}
         self.flip_start_times = {}
         
         self.pending_upgrade = None
+
+        if manual_placement:
+            self.phase = "placement"
+            self.placement_placed = set()
+            max_number = len(self.cards) // 2
+            tokens = [number for number in range(1, max_number + 1) for _ in range(2)]
+            self.placement_hands = {pid: [] for pid in self.player_order}
+            for index, number in enumerate(tokens):
+                self.placement_hands[self.player_order[index % len(self.player_order)]].append(number)
+            for hand in self.placement_hands.values():
+                hand.sort()
+        else:
+            self.phase = "preview"
+            self.placement_hands = {}
+            self.placement_placed = set(self.cards)
 
         await self.broadcast_game_state()
         
@@ -112,8 +155,10 @@ class o3MBGame(RoundBaseGame):
             "type": "cards_sync",
             "cards": self.cards
         })
+        if not manual_placement:
+            asyncio.create_task(self._finish_preview_after_delay())
 
-    def _init_cards(self):
+    def _init_cards(self, randomize=True):
         import random
         difficulty = self.config.get("difficulty", "normal")
         
@@ -127,7 +172,10 @@ class o3MBGame(RoundBaseGame):
             numbers = [0, 1, 2, 3, 4, 5] * 2  # 生成两组0-5，共12个数字
             letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
         
-        random.shuffle(numbers)
+        if randomize:
+            random.shuffle(numbers)
+        else:
+            numbers = [0] * len(numbers)
         cards = {}
         for idx, number in enumerate(numbers):
             letter = letters[idx]
@@ -139,11 +187,66 @@ class o3MBGame(RoundBaseGame):
             }
         return cards
 
+    def _next_placement_player(self):
+        start = self.player_order.index(self.current_player)
+        for offset in range(1, len(self.player_order) + 1):
+            candidate = self.player_order[(start + offset) % len(self.player_order)]
+            if self.placement_hands.get(candidate):
+                return candidate
+        return None
+
+    async def _place_number(self, player_id, card_id, number, from_timeout=False):
+        if player_id != self.current_player:
+            return await self.broadcast_to_player(player_id, {
+                "type": "error", "message": "还没有轮到你放置"
+            })
+        if card_id not in self.cards or card_id in self.placement_placed:
+            return await self.broadcast_to_player(player_id, {
+                "type": "error", "message": "请选择一个空方格"
+            })
+        try:
+            number = int(number)
+        except (TypeError, ValueError):
+            return await self.broadcast_to_player(player_id, {
+                "type": "error", "message": "请选择要放置的数字"
+            })
+        hand = self.placement_hands.get(player_id, [])
+        if number not in hand:
+            return await self.broadcast_to_player(player_id, {
+                "type": "error", "message": "你的手中没有该数字"
+            })
+        if not from_timeout:
+            self._complete_decision(player_id, reset_timeout_count=True)
+        hand.remove(number)
+        self.cards[card_id]["number"] = number
+        self.placement_placed.add(card_id)
+        await self.broadcast({
+            "type": "card_placed", "player_id": player_id,
+            "cardId": card_id, "number": number,
+        })
+        next_player = self._next_placement_player()
+        if next_player is None:
+            self.phase = "flipping"
+            self.start_time = None
+            self.current_player = self.player_order[0]
+        else:
+            self.current_player = next_player
+        await self.broadcast_game_state()
+
     async def process_action(self, player_id, action):
         print(f"🔧 process_action: 玩家 {player_id}, 动作 {action}")
         if action is None:
             await self.broadcast_to_player(player_id, {"type": "error", "msg": "动作信息缺失"})
             return
+
+        if self.phase == "placement":
+            if action.get("type") != "place_number":
+                return await self.broadcast_to_player(player_id, {
+                    "type": "error", "message": "请先完成数字放置"
+                })
+            return await self._place_number(
+                player_id, str(action.get("cardId") or ""), action.get("number")
+            )
         
         # 检查是否在预览期间
         if self.start_time:
@@ -164,6 +267,11 @@ class o3MBGame(RoundBaseGame):
                 return
             
         if action.get("type") == "flip":
+            if player_id != self.current_player:
+                return await self.broadcast_to_player(player_id, {
+                    "type": "error", "message": "还没有轮到你"
+                })
+            self._complete_decision(player_id, reset_timeout_count=True)
             card_id = action.get("cardId")
             card = self.cards.get(card_id)
             if not card:
@@ -226,6 +334,8 @@ class o3MBGame(RoundBaseGame):
                     "flipBack": flip_back
                 }
             })
+            if len(self.current_flip_cards) == 1:
+                await self.broadcast_game_state()
             
             # 如果翻了两张牌，判断是否匹配
             if len(self.current_flip_cards) == 2:
@@ -289,6 +399,7 @@ class o3MBGame(RoundBaseGame):
             if player_id != self.pending_upgrade["player_id"]:
                 await self.broadcast_to_player(player_id, {"type": "error", "msg": "只能升级自己匹配的卡牌"})
                 return
+            self._complete_decision(player_id, reset_timeout_count=True)
             
             card_id = action.get("cardId")
             if card_id not in [self.pending_upgrade["card1_id"], self.pending_upgrade["card2_id"]]:
@@ -348,7 +459,85 @@ class o3MBGame(RoundBaseGame):
         # 异步执行清理任务
         asyncio.create_task(cleanup_flip_state())
 
+    async def _finish_preview_after_delay(self):
+        await asyncio.sleep(self.preview_duration)
+        if self.phase == "preview" and self.state != "finished":
+            self.phase = "flipping"
+            await self.broadcast_game_state()
+
+    def _complete_decision(self, player_id=None, reset_timeout_count=False):
+        if self.decision_task and self.decision_task is not asyncio.current_task():
+            self.decision_task.cancel()
+        self.decision_task = None
+        self.decision = None
+        if reset_timeout_count and player_id is not None:
+            self.timeout_counts[player_id] = 0
+
+    def _arm_decision_timer(self):
+        if self.state == "finished" or self.phase in {"waiting", "preview"} or not self.current_player:
+            self._complete_decision()
+            return
+        actor = (self.pending_upgrade or {}).get("player_id", self.current_player)
+        signature = [self.phase, actor, len(self.current_flip_cards),
+                     (self.pending_upgrade or {}).get("card1_id"), self.round]
+        if self.decision and self.decision.get("signature") == signature:
+            return
+        self._complete_decision()
+        self.decision_sequence += 1
+        timeout = 0.15 if actor in self.managed_players else self.action_timeout_seconds
+        self.decision = {
+            "id": self.decision_sequence, "player_id": actor,
+            "kind": "placement" if self.phase == "placement" else
+                    "upgrade" if self.pending_upgrade else "flip",
+            "deadline": time.time() + timeout, "timeout_seconds": timeout,
+            "signature": signature,
+        }
+        self.decision_task = asyncio.create_task(
+            self._decision_timeout(self.decision_sequence, actor, timeout)
+        )
+
+    async def _decision_timeout(self, decision_id, player_id, timeout):
+        try:
+            await asyncio.sleep(timeout)
+            if not self.decision or self.decision.get("id") != decision_id:
+                return
+            kind = self.decision["kind"]
+            self.decision = None
+            self.decision_task = None
+            count = self.timeout_counts.get(player_id, 0) + 1
+            self.timeout_counts[player_id] = count
+            if count >= 2:
+                self.managed_players.add(player_id)
+            if kind == "placement":
+                empty = [card_id for card_id in self.cards if card_id not in self.placement_placed]
+                hand = self.placement_hands.get(player_id, [])
+                if empty and hand:
+                    await self._place_number(player_id, empty[0], min(hand), from_timeout=True)
+            elif kind == "upgrade" and self.pending_upgrade:
+                await self.process_action(player_id, {
+                    "type": "upgrade_card", "cardId": self.pending_upgrade["card1_id"]
+                })
+                self.timeout_counts[player_id] = count
+            else:
+                self.scores[player_id] = self.scores.get(player_id, 0) - 1
+                self.error_counts[player_id] = self.error_counts.get(player_id, 0) + 1
+                cleared_cards = list(self.current_flip_cards)
+                self.current_flip_cards = []
+                self.locked = False
+                self.current_player = self.next_player()
+                await self.broadcast({
+                    "type": "player_timed_out", "player_id": player_id,
+                    "timeout_count": count, "managed": player_id in self.managed_players,
+                    "default_action": "wrong_without_flip",
+                    "clearedCards": cleared_cards,
+                })
+                await self.broadcast_game_state()
+                await self.check_end_condition()
+        except asyncio.CancelledError:
+            return
+
     async def broadcast_game_state(self):
+        self._arm_decision_timer()
         game_info = {}
         for pid in self.player_order:
             game_info[pid] = {
@@ -371,7 +560,16 @@ class o3MBGame(RoundBaseGame):
             "round": self.round,
             "gameInfo": game_info,
             "isPreview": is_preview,
-            "previewRemaining": max(0, self.preview_duration - elapsed)
+            "previewRemaining": max(0, self.preview_duration - elapsed),
+            "phase": self.phase,
+            "placement": {
+                "placed": list(self.placement_placed),
+                "hands": self.placement_hands,
+            } if self.phase == "placement" else None,
+            "decision": ({k: v for k, v in self.decision.items() if k != "signature"}
+                         if self.decision else None),
+            "timeout_counts": self.timeout_counts,
+            "managed_players": list(self.managed_players),
         })
 
     def is_game_finished(self) -> bool:
@@ -755,6 +953,9 @@ class o3MBGame(RoundBaseGame):
 
     async def on_player_reconnect(self, player_id: str):
         """处理玩家重连，发送完整状态同步"""
+        if player_id not in self.scores or player_id not in self.error_counts or not self.cards:
+            await self.broadcast_game_state()
+            return
         # 发送完整的游戏状态
         await self.broadcast_game_state()
         
@@ -779,5 +980,3 @@ class o3MBGame(RoundBaseGame):
         })
         
         print(f"玩家 {player_id} 重连状态同步完成")
-
-

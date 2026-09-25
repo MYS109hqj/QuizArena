@@ -2,6 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
+import logging
+
+from sqlalchemy.exc import SQLAlchemyError
 
 from .database import SessionLocal
 from .auth import (
@@ -40,6 +43,23 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+logger = logging.getLogger(__name__)
+
+
+def serialize_user(user: User) -> dict:
+    """Normalize legacy nullable columns before response validation."""
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "created_at": user.created_at or datetime.utcnow(),
+        "avatar": user.avatar or "default_avatar.png",
+        "total_games": user.total_games or 0,
+        "total_score": user.total_score or 0,
+        "win_count": user.win_count or 0,
+    }
 
 # 注册用户
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -129,8 +149,22 @@ async def login(user_login: UserLogin, response: Response):
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "user": user
+            "user": serialize_user(user)
         }
+    except HTTPException:
+        raise
+    except SQLAlchemyError:
+        logger.exception("Database error while logging in user %r", user_login.username)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="登录服务暂时无法连接数据库，请稍后重试",
+        )
+    except Exception:
+        logger.exception("Unexpected login error for user %r", user_login.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="登录服务内部错误，请联系管理员查看服务端日志",
+        )
     finally:
         db.close()
 

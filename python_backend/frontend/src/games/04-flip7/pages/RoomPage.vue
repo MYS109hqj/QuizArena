@@ -1,5 +1,6 @@
 <template>
   <main class="room">
+    <div v-if="store.initializing" class="loading-screen">正在验证登录信息并加入房间…</div>
     <Transition name="toast"><div v-if="store.notice" class="toast" :class="store.notice.kind">{{store.notice.message}}</div></Transition>
     <header><button @click="leave">← 返回大厅</button><h1>Flip 7 房间</h1><code>{{ route.params.roomId }}</code></header>
     <section class="panel summary">
@@ -47,7 +48,7 @@
       <button class="primary" @click="addBot">添加机器人</button>
     </section>
 
-    <section class="players"><article v-for="(player,id) in store.players" :key="id" class="player"><div class="avatar">{{player.is_bot?'🤖':player.name?.[0]?.toUpperCase()||'P'}}</div><strong>{{store.getPlayerName(id)}}</strong><small v-if="String(id)===String(store.room?.owner?.id)">房主</small><button v-if="isOwner&&!isPlaying&&player.is_bot" @click="store.removeBot(id)">移除</button><button v-if="!isPlaying&&String(id)===String(store.player_id)&&!isOwner" @click="store.toggleReady()">{{player.ready?'取消准备':'准备'}}</button></article></section>
+    <section class="players"><article v-for="(player,id) in store.players" :key="id" class="player"><div class="avatar">{{player.is_bot?'🤖':player.name?.[0]?.toUpperCase()||'P'}}</div><strong>{{store.getPlayerName(id)}}</strong><small v-if="String(id)===String(store.room?.owner?.id)">房主</small><small :class="player.online?'online':'offline'">{{player.is_bot?'机器人':player.online?'在线':'离线'}}</small><button v-if="isOwner&&!isPlaying&&String(id)!==String(store.player_id)" @click="removeMember(id)">{{player.is_bot?'删除机器人':'踢出玩家'}}</button><button v-if="!isPlaying&&String(id)===String(store.player_id)&&!isOwner" @click="store.toggleReady()">{{player.ready?'取消准备':'准备'}}</button></article></section>
     <section class="actions"><button v-if="isPlaying" class="primary" @click="goGame">进入游戏</button><button v-else-if="isOwner" class="primary" :disabled="!canStart" @click="store.startGame()">开始游戏</button><button @click="showRules=true">查看规则</button></section>
     <div v-if="showRules" class="overlay" @click.self="showRules=false"><article class="rules"><button class="close" @click="showRules=false">×</button><h2>Flip 7 规则</h2><p>玩家依次各翻一张牌；爆牌、冻结或停牌的玩家会被跳过。所有玩家均不可行动，或有人集齐七种数字时，本大轮结束。</p><p>实时概率永远表示该玩家继续翻下一张牌时直接爆牌的概率，不展开 Flip 3/Flip 4，也不考虑 Second Chance。</p><p>自定义牌组固定遵守 0-N、数字 N 投放 N 张；功能牌和修正牌可以任意混合，并可独立开启残酷模式。</p></article></div>
   </main>
@@ -74,15 +75,18 @@ const enabledSpecials=computed(()=>specialOptions.filter(x=>settings.deck_spec.s
 function enabledCards(counts,options){return options.filter(x=>Number(counts[x.key]||0)>0).map(x=>`${x.label}×${counts[x.key]}`).join('、');}
 watch(()=>store.gameState.rules,rules=>{if(!rules)return;Object.assign(settings,rules);const d=rules.deck_spec||{};const blank=blankCustom();settings.deck_spec={...blank,...d,special_numbers:{...blank.special_numbers,...(d.special_numbers||{})},actions:{...blank.actions,...(d.actions||{})},modifiers:{...blank.modifiers,...(d.modifiers||{})}};},{deep:true,immediate:true});
 watch(isPlaying,value=>{if(value)goGame();});
-onMounted(()=>{store.initStore();if(!isWebSocketActive())store.enterRoom(route.params.roomId);});
+watch(()=>store.room_id,value=>{if(!value)router.push({name:'Flip7Lobby'});});
+onMounted(async()=>{try{await store.initStore();if(!isWebSocketActive())await store.enterRoom(route.params.roomId);}catch{router.push('/login');}});
 function presetChanged(){if(settings.deck_preset==='base')settings.brutal_mode=false;if(settings.deck_preset==='custom')settings.deck_spec=blankCustom();saveRules();}
 function saveRules(){if(settings.deck_preset==='base')settings.brutal_mode=false;store.updateRules(JSON.parse(JSON.stringify(settings)));}
 function addBot(){store.addBot({...bot,threshold:bot.strategy==='risk_threshold'?Math.min(1,Math.max(0,Number(bot.threshold))):Number(bot.threshold)});}
-function goGame(){router.push({name:'Flip7Game',params:{roomId:route.params.roomId}});} function leave(){store.leaveRoom();router.push({name:'Flip7Lobby'});}
+async function removeMember(id){try{await store.kickMember(id);}catch(error){store.showNotice(error.response?.data?.detail||'移除失败','error');}}
+function goGame(){router.push({name:'Flip7Game',params:{roomId:route.params.roomId}});} async function leave(){await store.leaveRoom();router.push({name:'Flip7Lobby'});}
 </script>
 
 <style scoped>
 .room{min-height:100vh;padding:32px;color:#f7f4ea;background:radial-gradient(circle at top,#4a2470,#171025 65%);font-family:system-ui}header,.summary,.actions{display:flex;align-items:center;justify-content:space-between;gap:16px}button,input,select{font:inherit}button{border:0;border-radius:10px;padding:10px 18px;cursor:pointer}.primary{background:#ffd84d;color:#291747;font-weight:800}.primary:disabled{opacity:.4}.panel,.player{background:#ffffff14;border:1px solid #ffffff25;border-radius:18px;padding:20px;margin:20px 0}.settings{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:14px}.settings h2,.custom-deck{grid-column:1/-1}.settings label{display:flex;justify-content:space-between;gap:12px;background:#ffffff10;padding:14px;border-radius:12px}.custom-deck{border:1px solid #ffffff30;border-radius:14px;padding:16px}.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.disabled{opacity:.45}.players{display:flex;flex-wrap:wrap;gap:16px}.player{margin:0;min-width:150px;display:grid;gap:9px;justify-items:center}.avatar{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:#ffd84d;color:#31184c;font-size:24px;font-weight:900}.overlay{position:fixed;inset:0;background:#000b;display:grid;place-items:center;padding:20px}.rules{position:relative;max-width:720px;background:#fff;color:#292131;border-radius:20px;padding:32px;line-height:1.7}.close{position:absolute;right:15px;top:12px;font-size:24px}@media(max-width:650px){.settings{grid-template-columns:1fr}.summary{align-items:flex-start;flex-direction:column}}
 .toast{position:fixed;z-index:1200;top:22px;left:50%;transform:translateX(-50%);padding:13px 22px;border-radius:12px;background:#fff;color:#261b31;box-shadow:0 10px 35px #0008}.toast.error{background:#ffdddd;color:#8b1722}.toast-enter-active,.toast-leave-active{transition:.25s}.toast-enter-from,.toast-leave-to{opacity:0;transform:translate(-50%,-15px)}.deck-viewer{line-height:1.7}
 .bot-settings{display:flex;align-items:center;gap:15px;flex-wrap:wrap}.bot-settings h2{width:100%}.bot-settings label{display:flex;gap:10px;align-items:center}
+.online{color:#91f0b0}.offline{color:#ffaaaa}.loading-screen{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;background:#171025;color:white;font-size:20px}
 </style>

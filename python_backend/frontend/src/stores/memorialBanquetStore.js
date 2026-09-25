@@ -60,7 +60,7 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
       mockEnabled: import.meta.env.VITE_USE_MOCK === 'true',
 
       // 临时默认值，将在初始化后通过syncUserData更新
-      player_id: `temp-${Date.now()}`,
+      player_id: '',
       player_name: '加载中...',
       avatarUrl: "https://images.unsplash.com/photo-1560169573-5ff6f7f35fe4?w=300&h=300&fit=crop&q=85&auto=format",
 
@@ -68,6 +68,7 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
       room_id: null,
       room: {},
       players: {},
+      playerDirectory: {},
 
       // 房间缓存，用于预加载优化
       roomCache: {},
@@ -86,6 +87,8 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
       matchedCards: [],
       unmatchedCards: [],
       pendingUpgrade: null,
+      placedCards: [],
+      selectedPlacementNumber: null,
 
       // 规则配置
       gameRules: {
@@ -235,6 +238,7 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
         }
       } else {
         try {
+          await axios.post(`${import.meta.env.VITE_URL}/api/rooms/o3MB/${roomId}/join`, {});
           // 获取玩家信息
           const player_info = {
             type: 'player_info',
@@ -263,7 +267,7 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
           // 建立该房间的 WebSocket 连接，并传入回调处理消息
           connectSPHSocket((data) => {
             this.handleMessage(data); // 所有消息统一由 store 处理
-          }, roomId, player_info);
+          }, roomId, player_info, 'o3MB');
 
           this.room_id = roomId; // 设置 room_id，触发 watch 跳转
           console.log(`✅ WebSocket连接建立完成，耗时: ${Date.now() - connectStartTime}ms`);
@@ -288,7 +292,7 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
         }, 800);
       } else {
         // TODO: 真实 WebSocket 连接逻辑
-        this.connectSPHSocket(userData);
+        connectSPHSocket(data => this.handleMessage(data), this.room_id, userData, 'o3MB');
       }
     },
 
@@ -321,7 +325,7 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
             const player_info = { "type": "player_info", "id": this.player_id, "name": this.player_name, "avatar": this.avatarUrl }
             connectSPHSocket((data) => {
               this.handleMessage(data);
-            }, this.room_id, player_info);
+            }, this.room_id, player_info, 'o3MB');
 
           } catch (error) {
             console.error('创建房间失败:', error);
@@ -358,8 +362,10 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
               "max_players": data.max_players,
               "min_players": data.min_players,
               "difficulty": data.difficulty || 'normal'
-            }
+            },
+            "rules": data.rules || {}
           };
+          this.playerDirectory = { ...this.playerDirectory, ...(data.players || {}) };
           this.players = data.players || {};
           this.gameStatus = data.status || 'waiting';
           if (data.room_id) {
@@ -388,7 +394,33 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
             round: data.round,
             isPreview: data.isPreview || false,
             previewRemaining: data.previewRemaining || 0
+            ,phase: data.phase || 'flipping'
+            ,placement: data.placement || null
+            ,decision: data.decision || null
+            ,timeout_counts: data.timeout_counts || {}
+            ,managed_players: data.managed_players || []
           };
+          this.placedCards = data.placement?.placed || (data.phase === 'placement' ? this.placedCards : []);
+          const hand = data.placement?.hands?.[this.player_id] || [];
+          if (!hand.includes(this.selectedPlacementNumber)) {
+            this.selectedPlacementNumber = hand[0] ?? null;
+          }
+          break;
+        case 'card_placed': {
+          const card = this.cards.find(item => item.cardId === data.cardId);
+          if (card) card.number = data.number;
+          if (!this.placedCards.includes(data.cardId)) this.placedCards.push(data.cardId);
+          if (!this.flippedCards.includes(data.cardId)) this.flippedCards.push(data.cardId);
+          setTimeout(() => {
+            this.flippedCards = this.flippedCards.filter(id => id !== data.cardId);
+            const placedCard = this.cards.find(item => item.cardId === data.cardId);
+            if (placedCard && this.gameState.phase !== 'preview') placedCard.number = null;
+          }, 700);
+          break;
+        }
+        case 'player_timed_out':
+          this.flippedCards = this.flippedCards.filter(id => !(data.clearedCards || []).includes(id));
+          this.unmatchedCards = this.unmatchedCards.filter(id => !(data.clearedCards || []).includes(id));
           break;
         case 'card_flipped':
           this.handleCardFlipped(data.result);
@@ -574,9 +606,34 @@ export const useMemorialBanquetStore = defineStore('memorialBanquet', {
       }
     },
 
+    async leaveRoom() {
+      const roomId = this.room_id;
+      if (roomId) {
+        try {
+          await axios.delete(`${import.meta.env.VITE_URL}/api/rooms/o3MB/${roomId}/membership`, {
+            withCredentials: true
+          });
+        } catch (error) {
+          console.error('退出房间失败:', error);
+        }
+      }
+      this.disconnect();
+    },
+
+    getPlayerName(playerId) {
+      const key = String(playerId);
+      return this.players?.[key]?.name || this.playerDirectory?.[key]?.name || '未知玩家';
+    },
+
     disconnect() {
+      const identity = {
+        player_id: this.player_id,
+        player_name: this.player_name,
+        avatarUrl: this.avatarUrl
+      };
       closeSPHSocket();
       this.$reset();
+      Object.assign(this, identity);
       this.syncUserData(); // 重新从userStore同步数据
     },
 

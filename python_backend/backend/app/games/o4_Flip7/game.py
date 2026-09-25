@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import WebSocket
@@ -61,6 +62,13 @@ class o4Flip7Game(RoundBaseGame):
         self.bot_runner_task: Optional[asyncio.Task] = None
         self.player_strategies: Dict[str, Dict[str, Any]] = {}
         self.autoplay_players: set[str] = set()
+        self.action_timeout_seconds = 20
+        self.secondary_timeout_seconds = 30
+        self.timeout_counts: Dict[str, int] = {}
+        self.managed_players: set[str] = set()
+        self.decision_task: Optional[asyncio.Task] = None
+        self.decision: Optional[Dict[str, Any]] = None
+        self.decision_sequence = 0
 
     async def connect(self, websocket: WebSocket, player: Player):
         reconnecting = player.id in self.persistent_players
@@ -186,7 +194,14 @@ class o4Flip7Game(RoundBaseGame):
             await self._save_player_strategy(player_id, event.get("strategy") or {})
         elif event.get("type") == "set_strategy_autoplay":
             await self._set_strategy_autoplay(player_id, bool(event.get("enabled")))
+        elif event.get("type") == "cancel_system_managed":
+            self.managed_players.discard(player_id)
+            self._complete_decision(player_id)
+            await self.broadcast_game_state()
         elif event.get("type") == "action":
+            supplied = event.get("decision_id")
+            if (supplied and self.decision and supplied != self.decision.get("id")):
+                return await self._error(player_id, "该操作已经过期，请按最新状态操作")
             await self.handle_player_action(player_id, event.get("action"), event.get("data") or {})
 
     @staticmethod
@@ -282,11 +297,13 @@ class o4Flip7Game(RoundBaseGame):
         if player_id != self.current_player:
             return await self._error(player_id, "还没有轮到你")
         if action == "draw":
+            self._complete_decision(player_id)
             await self._draw_for(player_id)
         elif action == "stop":
             state = self.player_state[player_id]
             if self.forced_draw or state["must_hit"]:
                 return await self._error(player_id, "当前必须继续翻牌")
+            self._complete_decision(player_id)
             state["stopped"] = True
             await self.broadcast({"type": "player_stopped", "player_id": player_id,
                                   "round_score": self._score_hand(state)})
@@ -493,6 +510,7 @@ class o4Flip7Game(RoundBaseGame):
             if not any(c.id == other_id and not c.face_down
                        for c in self.player_state[other_pid]["hand"]):
                 return await self._error(actor, "请选择另一张有效卡牌")
+        self._complete_decision(actor)
         self.pending_action = None
 
         if kind == "freeze":
@@ -883,7 +901,8 @@ class o4Flip7Game(RoundBaseGame):
         return "draw"
 
     def _is_automated(self, actor: Optional[str]) -> bool:
-        return bool(actor and (actor in self.bot_configs or actor in self.autoplay_players))
+        return bool(actor and (actor in self.bot_configs or
+                    (actor in self.autoplay_players and actor not in self.managed_players)))
 
     async def _run_bots(self) -> None:
         try:
@@ -921,6 +940,74 @@ class o4Flip7Game(RoundBaseGame):
                 and (self.bot_runner_task is None or self.bot_runner_task.done())):
             self.bot_runner_task = asyncio.create_task(self._run_bots())
 
+    def _complete_decision(self, player_id: str) -> None:
+        self.timeout_counts[player_id] = 0
+        if self.decision_task and self.decision_task is not asyncio.current_task():
+            self.decision_task.cancel()
+        self.decision_task = None
+        self.decision = None
+
+    def _decision_signature(self) -> tuple:
+        if self.pending_action:
+            return ("secondary", self.pending_action.get("actor"),
+                    self.pending_action.get("card", {}).get("id"), self.round)
+        return ("primary", self.current_player, self.round, self.turn_cursor)
+
+    def _arm_decision_timer(self) -> None:
+        if self.state != "player_turn" or not self.current_player:
+            return
+        actor = (self.pending_action or {}).get("actor", self.current_player)
+        if actor in self.bot_configs or (actor in self.autoplay_players
+                                         and actor not in self.managed_players):
+            return
+        signature = self._decision_signature()
+        if self.decision and self.decision.get("signature") == signature:
+            return
+        if self.decision_task and self.decision_task is not asyncio.current_task():
+            self.decision_task.cancel()
+        secondary = bool(self.pending_action)
+        duration = (0.15 if actor in self.managed_players else
+                    self.secondary_timeout_seconds if secondary else
+                    self.action_timeout_seconds)
+        self.decision_sequence += 1
+        decision_id = f"{self.round}-{self.decision_sequence}-{actor}"
+        self.decision = {
+            "id": decision_id, "player_id": actor,
+            "kind": "secondary" if secondary else "primary",
+            "deadline": time.time() + duration, "duration": duration,
+            "signature": signature,
+        }
+        self.decision_task = asyncio.create_task(
+            self._decision_timeout(decision_id, duration))
+
+    async def _decision_timeout(self, decision_id: str, duration: float) -> None:
+        try:
+            await asyncio.sleep(duration)
+            if not self.decision or self.decision["id"] != decision_id:
+                return
+            actor = self.decision["player_id"]
+            secondary = self.decision["kind"] == "secondary"
+            count = self.timeout_counts.get(actor, 0) + 1
+            self.decision = None
+            self.decision_task = None
+            if count >= 2:
+                self.managed_players.add(actor)
+            if secondary and self.pending_action and self.pending_action.get("actor") == actor:
+                await self._resolve_selection(actor, self._bot_selection(actor))
+            elif not secondary and self.current_player == actor:
+                state = self.player_state[actor]
+                state["stopped"] = True
+                await self.broadcast({"type": "player_timed_out", "player_id": actor,
+                                      "managed": actor in self.managed_players,
+                                      "default_action": "stop"})
+                await self.broadcast({"type": "player_stopped", "player_id": actor,
+                                      "round_score": self._score_hand(state),
+                                      "reason": "timeout"})
+                await self._advance_turn()
+            self.timeout_counts[actor] = count
+        except asyncio.CancelledError:
+            return
+
     async def broadcast_game_state(self):
         if not self.player_order:
             return
@@ -930,6 +1017,9 @@ class o4Flip7Game(RoundBaseGame):
             probabilities = {pid: self._probability_for(pid) for pid in self.player_order}
         elif self.game_rules.get("probability_enabled") and visibility == "current" and self.current_player:
             probabilities = {self.current_player: self._probability_for(self.current_player)}
+        self._arm_decision_timer()
+        public_decision = ({key: value for key, value in self.decision.items()
+                            if key != "signature"} if self.decision else None)
         payload = {
             "type": "game_state", "state": self.state, "current_player": self.current_player,
             "round": self.round, "total_rounds": self.total_rounds,
@@ -940,6 +1030,9 @@ class o4Flip7Game(RoundBaseGame):
             "last_round_scores": self.last_round_scores, "rules": self.game_rules,
             "deck_spec": self.deck_spec.public(), "deck_summary": self.deck_spec.summary(),
             "probabilities": probabilities,
+            "decision": public_decision,
+            "timeout_counts": self.timeout_counts,
+            "managed_players": list(self.managed_players),
             "autoplay_states": {
                 pid: {
                     "enabled": pid in self.autoplay_players,

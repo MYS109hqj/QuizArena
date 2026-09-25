@@ -32,86 +32,91 @@ import MemorialBanquetFinalState from '../games/03-memorialBanquet/pages/FinalSt
 import Flip7Lobby from '../games/04-flip7/pages/GameLobby.vue';
 import Flip7Room from '../games/04-flip7/pages/RoomPage.vue';
 import Flip7Game from '../games/04-flip7/pages/GamePage.vue';
+import MazeRaceLobby from '../games/05-mazeRace/pages/GameLobby.vue';
+import MazeRaceRoom from '../games/05-mazeRace/pages/RoomPage.vue';
+import MazeRaceGame from '../games/05-mazeRace/pages/GamePage.vue';
+import NewQuizLobby from '../games/06-newQuizGame/pages/GameLobby.vue';
+import NewQuizRoom from '../games/06-newQuizGame/pages/RoomPage.vue';
+import NewQuizGamePage from '../games/06-newQuizGame/pages/GamePage.vue';
+import QuestionBanksPage from '../games/06-newQuizGame/pages/QuestionBanksPage.vue';
 
 // 999-template 游戏相关页面
 import TemplateLobby from '../games/999-template/pages/GameLobby.vue';
 import TemplateRoom from '../games/999-template/pages/RoomPage.vue';
 import TemplateGame from '../games/999-template/pages/GamePage.vue';
 
-
-
 const routes = [
   // 主页路由
   {
     path: '/',
     name: 'HomePage',
-    component: HomePage
+    component: HomePage,
   },
   // 登录/注册页面
   {
     path: '/login',
     name: 'LoginPage',
-    component: LoginPage
+    component: LoginPage,
   },
   // 用户设置页面
   {
     path: '/settings',
     name: 'UserSettingsPage',
-    component: UserSettingsPage
+    component: UserSettingsPage,
   },
   // 游戏记录页面
   {
     path: '/records',
     name: 'GameRecordsPage',
-    component: GameRecordsPage
+    component: GameRecordsPage,
   },
-  {
-    path: '/quiz',
-    children: [
-      {
-        path: 'enter',
-        name: 'QuizEnterPage',
-        component: EnterPage_Quiz
-      },
-      {
-        path: 'answer/:roomId',
-        name: 'QuizAnswerPage',
-        component: AnswerPage_Quiz,
-        props: route => ({
-          roomId: route.params.roomId,
-          name: route.query.name,
-          avatarUrl: route.query.avatarUrl
-        })
-      },
-      {
-        path: 'question/:roomId',
-        name: 'QuizQuestionPage',
-        component: QuestionPage_Quiz,
-        props: route => ({
-          roomId: route.params.roomId
-        })
-      },
-      {
-        path: 'test',
-        name: 'QuizTestPage',
-        component: TestPage_Quiz
-      }
-    ]
-  },
+  // {
+  //   path: '/quiz',
+  //   children: [
+  //     {
+  //       path: 'enter',
+  //       name: 'QuizEnterPage',
+  //       component: EnterPage_Quiz
+  //     },
+  //     {
+  //       path: 'answer/:roomId',
+  //       name: 'QuizAnswerPage',
+  //       component: AnswerPage_Quiz,
+  //       props: route => ({
+  //         roomId: route.params.roomId,
+  //         name: route.query.name,
+  //         avatarUrl: route.query.avatarUrl
+  //       })
+  //     },
+  //     {
+  //       path: 'question/:roomId',
+  //       name: 'QuizQuestionPage',
+  //       component: QuestionPage_Quiz,
+  //       props: route => ({
+  //         roomId: route.params.roomId
+  //       })
+  //     },
+  //     {
+  //       path: 'test',
+  //       name: 'QuizTestPage',
+  //       component: TestPage_Quiz
+  //     }
+  //   ]
+  // },
   {
     path: '/samePatternHunt',
     children: [
       { path: '', name: 'SPHLobby', component: GameLobby },
       { path: 'room/:roomId', name: 'SPHRoom', component: RoomPage },
       { path: 'game/:roomId', name: 'SPHGame', component: GamePage },
-    ]
+    ],
   },
   {
     path: '/hiddenWallMaze',
     children: [
       { path: '', name: 'MazeList', component: MazeList },
       { path: 'maze/:id', name: 'MazeGame', component: MazeGame },
-    ]
+    ],
   },
   {
     path: '/memorialBanquet',
@@ -119,8 +124,12 @@ const routes = [
       { path: '', name: 'MBLobby', component: MemorialBanquetLobby },
       { path: 'room/:roomId', name: 'MBRoom', component: MemorialBanquetRoom },
       { path: 'game/:roomId', name: 'MBGame', component: MemorialBanquetGame },
-      { path: 'final/:roomId', name: 'MBFinalState', component: MemorialBanquetFinalState },
-    ]
+      {
+        path: 'final/:roomId',
+        name: 'MBFinalState',
+        component: MemorialBanquetFinalState,
+      },
+    ],
   },
   {
     path: '/flip7',
@@ -128,7 +137,24 @@ const routes = [
       { path: '', name: 'Flip7Lobby', component: Flip7Lobby },
       { path: 'room/:roomId', name: 'Flip7Room', component: Flip7Room },
       { path: 'game/:roomId', name: 'Flip7Game', component: Flip7Game },
-    ]
+    ],
+  },
+  {
+    path: '/mazeRace',
+    children: [
+      { path: '', name: 'MazeRaceLobby', component: MazeRaceLobby },
+      { path: 'room/:roomId', name: 'MazeRaceRoom', component: MazeRaceRoom },
+      { path: 'game/:roomId', name: 'MazeRaceGame', component: MazeRaceGame },
+    ],
+  },
+  {
+    path: '/newQuizGame',
+    children: [
+      { path: '', name: 'NewQuizLobby', component: NewQuizLobby },
+      { path: 'banks', name: 'NewQuizBanks', component: QuestionBanksPage },
+      { path: 'room/:roomId', name: 'NewQuizRoom', component: NewQuizRoom },
+      { path: 'game/:roomId', name: 'NewQuizGame', component: NewQuizGamePage },
+    ],
   },
   {
     path: '/template',
@@ -136,8 +162,8 @@ const routes = [
       { path: '', name: 'TemplateLobby', component: TemplateLobby },
       { path: 'room/:roomId', name: 'TemplateRoom', component: TemplateRoom },
       { path: 'game/:roomId', name: 'TemplateGame', component: TemplateGame },
-    ]
-  }
+    ],
+  },
 ];
 
 // SPH路由守卫函数
@@ -152,26 +178,27 @@ const requireAuth = (to, from, next) => {
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes
+  routes,
 });
 
-// 全局路由守卫 - 为SPH和MB相关路由添加登录验证
-router.beforeEach((to, from, next) => {
-  // 检查是否为SPH或MB相关路由
-  const isSPHRoute = to.path.startsWith('/samePatternHunt');
-  const isMBRoute = to.path.startsWith('/memorialBanquet');
-
-  if (isSPHRoute || isMBRoute) {
-    const userStore = useUserStore();
-    if (!userStore.isLoggedIn) {
-      // 保存目标路由，登录后可以重定向回来
-      sessionStorage.setItem('redirectAfterLogin', to.fullPath);
-      next('/login');
-      return;
-    }
-  }
-
-  next();
+// Every multiplayer game requires an initialized authenticated profile.
+router.beforeEach(async (to) => {
+  const prefixes = [
+    '/quiz',
+    '/samePatternHunt',
+    '/memorialBanquet',
+    '/flip7',
+    '/mazeRace',
+    '/newQuizGame',
+    '/template',
+  ];
+  if (!prefixes.some((prefix) => to.path.startsWith(prefix))) return true;
+  const userStore = useUserStore();
+  if (!userStore.isLoggedIn || !userStore.user)
+    await userStore.checkLoginStatus();
+  if (userStore.isLoggedIn && userStore.user) return true;
+  sessionStorage.setItem('redirectAfterLogin', to.fullPath);
+  return '/login';
 });
 
 export default router;

@@ -90,61 +90,113 @@ def get_migration_files():
     return [file for _, file in migration_files]
 
 def execute_migration_script(cursor, script_path):
-    """执行单个SQL迁移脚本"""
+    """执行单个SQL迁移脚本
+
+    支持：
+    - 行注释 (-- ...) 和块注释 (/* ... */) 不污染 SQL 语句
+    - 字符串内的分隔符不切分语句
+    - MySQL 客户端的 DELIMITER 指令（用于触发器/存储过程体内的分号）
+    """
     try:
         with open(script_path, 'r', encoding='utf-8') as f:
             sql_script = f.read()
-        
-        # 分割SQL语句（处理分号，但忽略注释和字符串中的分号）
+
         statements = []
         current_statement = ''
-        in_string = None
+        delimiter = ';'  # 当前语句分隔符，默认分号；可被 DELIMITER 指令修改
+        i = 0
+        n = len(sql_script)
+        in_string = None  # 当前字符串定界符（' 或 "），None 表示不在字符串中
         in_comment_line = False
         in_comment_block = False
-        
-        for i, char in enumerate(sql_script):
+
+        while i < n:
+            char = sql_script[i]
+
+            # 处理块注释 /* ... */
             if in_comment_block:
-                if char == '*' and i < len(sql_script) - 1 and sql_script[i+1] == '/':
+                if char == '*' and i + 1 < n and sql_script[i+1] == '/':
                     in_comment_block = False
+                    i += 2
+                    continue
+                i += 1
                 continue
-            
+
+            # 处理行注释 -- ...（不把注释字符加入语句）
             if in_comment_line:
                 if char == '\n':
                     in_comment_line = False
+                i += 1
                 continue
-            
+
+            # 处理字符串
             if in_string:
                 current_statement += char
                 if char == in_string and (i == 0 or sql_script[i-1] != '\\'):
                     in_string = None
+                i += 1
                 continue
-            
-            if char == '\'':
-                current_statement += char
-                in_string = char
-            elif char == '"':
-                current_statement += char
-                in_string = char
-            elif char == '-' and i < len(sql_script) - 1 and sql_script[i+1] == '-':
-                in_comment_line = True
-                current_statement += char
-            elif char == '/' and i < len(sql_script) - 1 and sql_script[i+1] == '*':
-                in_comment_block = True
-                current_statement += char
-            elif char == ';':
-                current_statement += char
-                statements.append(current_statement.strip())
+
+            # 识别 DELIMITER 指令（独占一行，MySQL 客户端语法）
+            stripped = current_statement.strip()
+            if (not stripped and char == 'D'
+                    and sql_script[i:i+9].upper() == 'DELIMITER'
+                    and (i + 9 >= n or sql_script[i+9].isspace())):
+                line_end = sql_script.find('\n', i)
+                if line_end == -1:
+                    line_end = n
+                delimiter_line = sql_script[i:line_end].strip()
+                parts = delimiter_line.split(None, 1)
+                if len(parts) == 2 and parts[1].strip():
+                    delimiter = parts[1].strip()
+                else:
+                    delimiter = ';'  # 无参数则恢复默认
                 current_statement = ''
-            else:
+                i = line_end + 1 if line_end < n else n
+                continue
+
+            # 识别块注释开始 /*
+            if char == '/' and i + 1 < n and sql_script[i+1] == '*':
+                in_comment_block = True
+                i += 2
+                continue
+
+            # 识别行注释开始 --
+            if char == '-' and i + 1 < n and sql_script[i+1] == '-':
+                in_comment_line = True
+                i += 2
+                continue
+
+            # 识别字符串定界符
+            if char == '\'' or char == '"':
                 current_statement += char
-        
+                in_string = char
+                i += 1
+                continue
+
+            # 识别当前分隔符（默认 ; 或 DELIMITER 指定的）
+            if delimiter and sql_script.startswith(delimiter, i):
+                stmt = current_statement.strip()
+                if stmt:
+                    statements.append(stmt)
+                current_statement = ''
+                i += len(delimiter)
+                continue
+
+            current_statement += char
+            i += 1
+
+        # 处理文件末尾残留的语句
         if current_statement.strip():
             statements.append(current_statement.strip())
-        
-        # 执行每个语句
+
+        # 执行每个语句；若语句产生结果集（SELECT/SHOW 等）需 fetchall 读取丢弃，
+        # 否则下一条 execute 会触发 mysql-connector 的 "Unread result found"
         for stmt in statements:
             cursor.execute(stmt)
-        
+            if cursor.description is not None:
+                cursor.fetchall()
+
         logger.info(f"成功执行迁移脚本: {os.path.basename(script_path)}")
         return True
     except Exception as e:

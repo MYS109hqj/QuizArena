@@ -19,6 +19,10 @@ class BaseGame(ABC):
         }
         self.state: str = "waiting"  # 游戏状态：waiting/playing/finished
         self.room: Optional["Room"] = None  # 关联的房间引用
+        # Games may override these and implement their own default action hook.
+        self.action_timeout_seconds: int = 60
+        self.secondary_timeout_seconds: int = 60
+        self.default_timeout_action: str = "skip"
         
     def set_room_reference(self, room: "Room") -> None:
         """设置房间引用，建立双向关联"""

@@ -1,0 +1,26 @@
+<template>
+  <main class="page"><section class="panel">
+    <p class="eyebrow">房间 {{ route.params.roomId }}</p><h1>记忆的迷宫</h1>
+    <p class="intro">墙体会在开局后隐藏。撞上内部墙会返回出生点；重复撞击达到设定次数后，这面墙才会为你显形。</p>
+    <div class="players"><article v-for="(player,id) in store.players" :key="id"><img v-if="player.avatar" :src="player.avatar" class="avatar"><span v-else class="avatar fallback">{{ player.name?.[0] || '?' }}</span><b>{{ player.name }}</b><small>{{ String(id)===String(store.room?.owner?.id) ? '房主' : (player.ready?'已准备':'未准备') }}</small></article><article v-for="slot in emptySlots" :key="`empty-${slot}`" class="empty"><span class="avatar fallback">＋</span><b>等待加入</b></article></div>
+    <section class="settings" :class="{disabled:!isOwner}"><h2>游戏设置</h2>
+      <label><span>游戏模式</span><select v-model="settings.game_mode" :disabled="!isOwner" @change="saveRules"><option value="classic">经典竞速（2 人）</option><option value="orienteering">定向越野（1–4 人）</option></select></label>
+      <p class="mode-note">{{ settings.game_mode==='orienteering' ? '每人从一个角出生，访问另外三个角后回到自己的起点获胜。' : '两人从底部两角出发，率先抵达对侧顶角获胜。' }}</p>
+      <label><span>行动模式</span><select v-model="settings.movement_mode" :disabled="!isOwner" @change="saveRules"><option value="turns">轮次行动（每人三步）</option><option value="free">自由行动</option></select></label>
+      <label><span>重复碰撞后显示墙体</span><input v-model="settings.reveal_hit_walls" type="checkbox" :disabled="!isOwner" @change="saveRules"></label>
+      <label><span>显示所需碰撞次数</span><input v-model.number="settings.wall_hit_threshold" type="number" min="1" max="10" :disabled="!isOwner||!settings.reveal_hit_walls" @change="saveRules"></label>
+    </section>
+    <div class="actions"><button v-if="!isOwner" class="primary" @click="store.toggleReady()">{{ me?.ready?'取消准备':'准备' }}</button><button v-if="isOwner" class="primary" :disabled="!canStart" @click="store.startGame()">开始游戏</button><button @click="leave">离开房间</button></div><p v-if="store.notice" class="error">{{ store.notice }}</p>
+  </section></main>
+</template>
+<script setup>
+import {computed,onMounted,reactive,watch} from 'vue'; import {useRoute,useRouter} from 'vue-router'; import {useMazeRaceStore} from '@/stores/mazeRaceStore';
+const store=useMazeRaceStore(),route=useRoute(),router=useRouter(); const settings=reactive({game_mode:'classic',reveal_hit_walls:true,wall_hit_threshold:2,movement_mode:'turns'});
+const isOwner=computed(()=>String(store.room?.owner?.id)===String(store.player_id)); const me=computed(()=>store.players[store.player_id]); const playerCount=computed(()=>Object.keys(store.players).length); const limit=computed(()=>settings.game_mode==='orienteering'?4:2); const emptySlots=computed(()=>Math.max(0,limit.value-playerCount.value));
+const canStart=computed(()=>playerCount.value>=(settings.game_mode==='orienteering'?1:2)&&playerCount.value<=limit.value&&Object.entries(store.players).every(([id,p])=>String(id)===String(store.room?.owner?.id)||p.ready));
+watch(()=>store.room?.rules,r=>{if(r)Object.assign(settings,{game_mode:r.game_mode||'classic',reveal_hit_walls:r.reveal_hit_walls!==false,wall_hit_threshold:Number(r.wall_hit_threshold||2),movement_mode:r.movement_mode||'turns'})},{immediate:true,deep:true}); watch(()=>store.gameStatus,s=>{if(s==='playing')router.push({name:'MazeRaceGame',params:{roomId:route.params.roomId}})}); onMounted(()=>{if(!store.room_id)store.enterRoom(route.params.roomId)});
+function saveRules(){if(!isOwner.value)return;settings.wall_hit_threshold=Math.max(1,Math.min(10,Number(settings.wall_hit_threshold)||2));store.updateRules({...settings})} async function leave(){await store.leaveRoom();router.push({name:'MazeRaceLobby'})}
+</script>
+<style scoped>
+.page{min-height:100vh;display:grid;place-items:center;padding:24px;color:#f7fff4;font-family:system-ui;background:radial-gradient(circle at 20% 10%,#70ad4b55,transparent 35%),linear-gradient(135deg,#244c2a,#102d1c)}.panel{width:min(820px,100%);padding:34px;border-radius:26px;background:#173822e8;box-shadow:0 24px 70px #07190ccc;border:1px solid #ffffff30}.eyebrow{color:#c8e8a6;letter-spacing:.12em;margin:0}.panel h1{font-size:clamp(32px,6vw,56px);margin:5px 0}.intro,.mode-note{color:#c9ddc5}.players{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:26px 0}.players article{display:grid;justify-items:center;gap:7px;padding:17px 8px;border-radius:17px;background:#ffffff12}.players article.empty{opacity:.45}.avatar{width:54px;height:54px;border-radius:50%;object-fit:cover}.fallback{display:grid;place-items:center;background:#d9f3a2;color:#18341e;font-size:23px;font-weight:900}.settings{display:grid;gap:13px;padding:22px;border-radius:18px;background:#0c2817aa}.settings h2{margin:0}.settings label{display:flex;align-items:center;justify-content:space-between;gap:20px}.settings select,.settings input[type=number]{padding:8px;border-radius:8px}.settings input[type=number]{width:70px}.settings.disabled{opacity:.7}.mode-note{margin:0;padding:10px 12px;border-left:3px solid #d9f3a2}.actions{display:flex;gap:10px;margin-top:20px}button{border:0;border-radius:10px;padding:12px 20px;cursor:pointer}button:disabled{opacity:.4}.primary{background:#d9f3a2;color:#17351d;font-weight:900}.error{color:#ffb1a5}@media(max-width:650px){.players{grid-template-columns:repeat(2,1fr)}.settings label{align-items:flex-start}}
+</style>

@@ -3,6 +3,7 @@ from .routes import router as websocket_router  # 使用相对导入
 from .auth_routes import router as auth_router  # 新增认证路由
 from .game_record_routes import router as game_record_router  # 新增游戏记录路由
 from .achievement_routes import router as achievement_router  # 新增成就路由
+from .question_bank_routes import router as question_bank_router
 from fastapi.middleware.cors import CORSMiddleware
 from .database import create_tables  # 新增数据库初始化
 import os
@@ -17,11 +18,11 @@ allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '').strip()
 if allowed_origins_env:
     # 如果设置了环境变量，使用环境变量中的域名
     allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',') if origin.strip()]
-    print(f"🔒 CORS配置: 使用环境变量中的允许源 - {allowed_origins}")
+    print(f"CORS配置: 使用环境变量中的允许源 - {allowed_origins}")
 else:
     # 如果没有设置环境变量，默认允许开发环境（localhost）
     allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
-    print("🔓 CORS配置: 使用开发环境默认源 - localhost")
+    print("CORS配置: 使用开发环境默认源 - localhost")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +36,7 @@ app.include_router(websocket_router)
 app.include_router(auth_router)
 app.include_router(game_record_router)
 app.include_router(achievement_router)
+app.include_router(question_bank_router)
 
 if __name__ == "__main__":
     import uvicorn

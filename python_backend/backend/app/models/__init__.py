@@ -8,6 +8,7 @@ from .user import User
 from .game_record import GameSession, GameRound, PlayerStats
 from .achievement import Achievement
 from .user_achievement import UserAchievement
+from .question_bank import QuestionBank, QuestionBankMember, QuestionItem, QuestionBankVersion
 
 __all__ = [
     "Base",
@@ -16,5 +17,9 @@ __all__ = [
     "GameRound",
     "PlayerStats",
     "Achievement",
-    "UserAchievement"
+    "UserAchievement",
+    "QuestionBank",
+    "QuestionBankMember",
+    "QuestionItem",
+    "QuestionBankVersion"
 ]

@@ -5,6 +5,8 @@ from app.games.o4_Flip7.game import Flip7Card, o4Flip7Game
 from app.games.o4_Flip7.domain.deck_spec import DeckSpec, DeckSpecError
 from app.games.o4_Flip7.domain.probability import next_draw_bust_probability
 from app.games.o4_Flip7.domain.strategies import build_strategy
+from app.rooms import Room
+from app.models.player import Player
 
 
 def game(vengeance=False, brutal=False):
@@ -736,3 +738,84 @@ def test_forced_draw_public_state_never_contains_card_objects():
     public = subject._public_forced_draw()
     assert "effects" not in public
     json.dumps(public)
+
+
+def test_transport_disconnect_keeps_room_membership_and_marks_offline():
+    subject = game()
+    room = Room("r", subject, owner_info={"id": "a", "name": "Alice"},
+                gameType="o4Flip7")
+    player = Player("a", "Alice", "")
+    websocket = object()
+    room.players["a"] = player
+    room.connections[websocket] = "a"
+    room.online_players.add("a")
+    subject.connections[websocket] = "a"
+    asyncio.run(room.disconnect(websocket))
+    assert "a" in room.players
+    assert "a" not in room.online_players
+
+
+def test_explicit_room_leave_removes_membership():
+    subject = game()
+    room = Room("r", subject, owner_info={"id": "a", "name": "Alice"},
+                gameType="o4Flip7")
+    room.players["a"] = Player("a", "Alice", "")
+    subject.persistent_players["a"] = room.players["a"]
+    asyncio.run(room.remove_member("a"))
+    assert "a" not in room.players
+    assert "a" not in subject.persistent_players
+
+
+def test_leave_after_settlement_keeps_participant_name_for_leaderboard():
+    subject = game()
+    subject.state = "finished"
+    room = Room("r", subject, owner_info={"id": "a", "name": "Alice"},
+                gameType="o4Flip7")
+    player = Player("a", "Alice", "")
+    room.players["a"] = player
+    subject.players["a"] = player
+    subject.persistent_players["a"] = player
+    asyncio.run(room.remove_member("a"))
+    assert "a" not in room.players
+    assert subject.persistent_players["a"].name == "Alice"
+
+
+def test_flip7_primary_timeout_passes_by_stopping_player():
+    subject = game()
+    subject.state = "player_turn"
+    subject.current_player = "a"
+    subject.turn_cursor = 0
+    subject.broadcast = _noop
+    subject.decision = {"id": "d1", "player_id": "a", "kind": "primary"}
+    asyncio.run(subject._decision_timeout("d1", 0))
+    assert subject.current_player == "b"
+    assert subject.player_state["a"]["stopped"] is True
+    assert subject.timeout_counts["a"] == 1
+
+
+def test_second_consecutive_timeout_enters_system_managed_state():
+    subject = game()
+    subject.state = "player_turn"
+    subject.current_player = "a"
+    subject.turn_cursor = 0
+    subject.timeout_counts["a"] = 1
+    subject.broadcast = _noop
+    subject.decision = {"id": "d2", "player_id": "a", "kind": "primary"}
+    asyncio.run(subject._decision_timeout("d2", 0))
+    assert "a" in subject.managed_players
+    assert subject.timeout_counts["a"] == 2
+
+
+def test_secondary_timeout_resolves_effect_with_legal_default():
+    subject = game(vengeance=True)
+    subject.state = "player_turn"
+    subject.current_player = "a"
+    subject.broadcast = _noop
+    subject.pending_action = {
+        "type": "freeze", "actor": "a", "player_id": "a", "targets": ["b"],
+        "card": Flip7Card("action", "Freeze").public(),
+    }
+    subject.decision = {"id": "d3", "player_id": "a", "kind": "secondary"}
+    asyncio.run(subject._decision_timeout("d3", 0))
+    assert subject.player_state["b"]["frozen"] is True
+    assert subject.pending_action is None

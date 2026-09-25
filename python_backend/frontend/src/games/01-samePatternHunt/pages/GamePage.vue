@@ -87,6 +87,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useSamePatternHuntStore } from '@/stores/samePatternHuntStore';
+import { useUserStore } from '@/stores/userStore';
 import { hasPendingConnection, restoreConnection, connectSPHSocket, isWebSocketActive, setRouteChanging } from '@/ws/samePatternSocket';
 import axios from 'axios';
 import GameHeader from '@/components/GameHeader.vue';
@@ -105,6 +106,7 @@ const getPatternImage = (patternId) => {
 };
 
 const store = useSamePatternHuntStore();
+const userStore = useUserStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -134,15 +136,15 @@ const rankedPlayers = computed(() => {
   return Object.entries(store.gameState.gameInfo)
     .map(([id, info]) => ({
       id,
-      name: store.players[id]?.name || '未知',
+      name: store.getPlayerName(id),
       score: info.score
     }))
     .sort((a, b) => b.score - a.score);
 });
 
 // 方法
-const leaveGame = () => {
-  store.send({ type: 'leave_room', roomId: store.room?.room_id });
+const leaveGame = async () => {
+  await store.leaveRoom();
   router.push({ name: 'SPHLobby' });
 };
 
@@ -166,7 +168,8 @@ const playAgain = async () => {
   }
 };
 
-const handleExit = () => {
+const handleExit = async () => {
+  await store.leaveRoom();
   router.push({ name: 'SPHLobby' });
 };
 
@@ -212,6 +215,31 @@ onMounted(async () => {
       handleFinalState(newValue);
     }
   }, { deep: true });
+
+  // Refresh recovery always starts from the authenticated account and the
+  // server-side room membership; never create a replacement room implicitly.
+  isReconnecting.value = true;
+  reconnectStatus.value = '正在恢复登录身份与游戏状态…';
+  try {
+    await userStore.checkLoginStatus();
+    if (!userStore.isLoggedIn || !userStore.user) throw new Error('登录状态已失效');
+    store.syncUserData();
+    await axios.post(`${import.meta.env.VITE_URL}/api/rooms/o2SPH/${roomId}/join`, {}, {
+      withCredentials: true
+    });
+    if (!isWebSocketActive()) await joinNewSession(roomId);
+    else store.send({ type: 'get_game_state' });
+    reconnectStatus.value = '游戏状态恢复成功';
+    setTimeout(() => {
+      isReconnecting.value = false;
+      reconnectStatus.value = '';
+    }, 500);
+  } catch (error) {
+    console.error('恢复游戏状态失败:', error);
+    reconnectStatus.value = error.response?.data?.detail || error.message || '恢复游戏状态失败';
+    setTimeout(() => router.replace({ name: 'SPHLobby' }), 1200);
+  }
+  return;
 
   // 检查连接状态
   if (isWebSocketActive()) {

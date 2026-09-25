@@ -4,6 +4,7 @@ from .models.user import Base as UserBase
 from .models.game_record import Base as GameRecordBase
 from .models.achievement import Base as AchievementBase
 from .models.user_achievement import Base as UserAchievementBase
+from .models.question_bank import Base as QuestionBankBase
 import os
 from dotenv import load_dotenv
 
@@ -21,16 +22,20 @@ MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'quizarena')
 SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4"
 
 # 创建数据库引擎 - 去除check_same_thread参数，这是SQLite特有的
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=int(os.getenv('MYSQL_POOL_RECYCLE_SECONDS', '1800')),
+)
 
 # 检查是否成功连接到MySQL数据库
 try:
     connection = engine.connect()
     connection.close()
-    print(f"✅ 成功连接到MySQL数据库: {MYSQL_DATABASE}@{MYSQL_HOST}:{MYSQL_PORT}")
+    print(f"MySQL连接成功: {MYSQL_DATABASE}@{MYSQL_HOST}:{MYSQL_PORT}")
 except Exception as e:
-    print(f"❌ 无法连接到MySQL数据库: {str(e)}")
-    print("⚠️ 请确保MySQL服务已启动，且.env文件中的配置正确")
+    print(f"MySQL连接失败: {str(e)}")
+    print("请确保MySQL服务已启动，且.env文件中的配置正确")
 
 # 创建SessionLocal类
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -52,6 +57,7 @@ def create_tables():
         print("成就定义表创建成功")
         
         UserAchievementBase.metadata.create_all(bind=engine)
+        QuestionBankBase.metadata.create_all(bind=engine)
         print("用户成就进度表创建成功")
         
         print("所有数据库表创建完成")

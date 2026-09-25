@@ -4,6 +4,7 @@ from fastapi import WebSocket
 from .games.base import BaseGame
 from .models.player import Player
 import uuid
+import asyncio
 
 class Room:
     def __init__(self, room_id: str, game: BaseGame, owner_info: Optional[Dict[str, Any]] = None, name: str = "",gameType:str = ""):
@@ -21,6 +22,7 @@ class Room:
         # 玩家和连接管理
         self.players: Dict[str, Player] = {}  # 玩家ID -> Player对象
         self.connections: Dict[WebSocket, str] = {}  # 连接 -> 玩家ID
+        self.online_players: set[str] = set()
         
         self._on_empty_callback: Optional[Callable[[Room], Any]] = None
         
@@ -31,6 +33,7 @@ class Room:
         # 存储连接和玩家信息
         self.connections[websocket] = player.id
         self.players[player.id] = player
+        self.online_players.add(player.id)
         
         # 如果没有房主，则第一个连接的玩家为房主，并默认准备
         if not self.owner:
@@ -169,37 +172,59 @@ class Room:
         if not player_id:
             return
             
-        # 移除连接和玩家
-        if websocket in self.connections:
-            del self.connections[websocket]
-        if player_id in self.players:
-            del self.players[player_id]
-        if player_id in self.ready_players:
-            self.ready_players.remove(player_id)
-        
-        # 通知游戏玩家已断开连接
-        await self.game.disconnect(websocket)
-        
-        # 处理房主离开的情况
+        self.connections.pop(websocket, None)
+        self.game.connections.pop(websocket, None)
+        if player_id not in self.connections.values():
+            self.online_players.discard(player_id)
+            if hasattr(self.game, "disconnected_players"):
+                self.game.disconnected_players.add(player_id)
+        await self.broadcast_state()
+
+    async def remove_member(self, player_id: str, reason: str = "left") -> None:
+        """Explicit leave/kick. Transport loss must never call this method."""
+        if player_id not in self.players:
+            return
+        sockets = [ws for ws, pid in self.connections.items() if pid == player_id]
+        for websocket in sockets:
+            self.connections.pop(websocket, None)
+            self.game.connections.pop(websocket, None)
+            try:
+                await websocket.send_json({"type": "removed_from_room", "reason": reason})
+                await websocket.close(code=4003)
+            except Exception:
+                pass
+        self.online_players.discard(player_id)
+        self.ready_players.discard(player_id)
+        self.players.pop(player_id, None)
+        game_finished = getattr(self.game, "state", None) == "finished"
+        # Keep the immutable participant profile after settlement so remaining
+        # clients can continue resolving leaderboard IDs to display names.
+        if not game_finished:
+            self.game.players.pop(player_id, None)
+            if hasattr(self.game, "persistent_players"):
+                self.game.persistent_players.pop(player_id, None)
+        if hasattr(self.game, "bot_configs"):
+            self.game.bot_configs.pop(player_id, None)
         if self.owner and self.owner["id"] == player_id:
-            # 转移房主权限
-            if self.players:
-                new_owner = next(iter(self.players.values()))
-                self.owner = {
-                    "id": new_owner.id,
-                    "name": new_owner.name,
-                    "avatar": new_owner.avatar or ""
-                }
-                # 新房主默认准备
+            humans = [p for pid, p in self.players.items() if not pid.startswith("bot-")]
+            if humans:
+                new_owner = humans[0]
+                self.owner = {"id": new_owner.id, "name": new_owner.name,
+                              "avatar": new_owner.avatar or ""}
                 self.ready_players.add(new_owner.id)
             else:
                 self.owner = None
-        
-        # 处理房间为空的情况
-        if len(self.players) == 0 and self._on_empty_callback:
-            await self._on_empty_callback(self)
-        else:
-            await self.broadcast_state()
+        if not any(not pid.startswith("bot-") for pid in self.players):
+            for bot_id in [pid for pid in self.players if pid.startswith("bot-")]:
+                self.players.pop(bot_id, None)
+                self.ready_players.discard(bot_id)
+                if hasattr(self.game, "persistent_players") and not game_finished:
+                    self.game.persistent_players.pop(bot_id, None)
+                if hasattr(self.game, "bot_configs"):
+                    self.game.bot_configs.pop(bot_id, None)
+        await self.broadcast_state()
+        if not self.players and self._on_empty_callback:
+            asyncio.create_task(self._on_empty_callback(self))
 
     async def broadcast_state(self, extra_message: Dict = None):
         """广播当前房间和游戏状态给所有连接的玩家"""
@@ -218,7 +243,8 @@ class Room:
                     "ready": p_id in self.ready_players,
                     "is_bot": p_id in getattr(self.game, "bot_configs", {}),
                     "strategy": getattr(self.game, "bot_configs", {}).get(p_id, {}).get("strategy"),
-                    "strategy_threshold": getattr(self.game, "bot_configs", {}).get(p_id, {}).get("threshold")
+                    "strategy_threshold": getattr(self.game, "bot_configs", {}).get(p_id, {}).get("threshold"),
+                    "online": p_id in self.online_players or p_id.startswith("bot-")
                 } for p_id, p in self.players.items()
             },
             "player_count": len(self.players),

@@ -7,6 +7,11 @@
         <p>{{ reconnectStatus }}</p>
       </div>
     </div>
+    <div v-if="remainingSeconds !== null" class="action-countdown">剩余 {{ remainingSeconds }} 秒</div>
+    <div v-if="isSystemManaged" class="managed-overlay">
+      <section><h2>正在托管中</h2><p>连续两次超时，系统正在自动执行默认行为。</p>
+        <button @click="store.send({ type: 'cancel_system_managed' })">取消托管</button></section>
+    </div>
 
     <!-- 规则设置模态框 -->
     <div v-if="showRulesModal" class="modal-overlay" @click.self="showRulesModal = false">
@@ -71,6 +76,17 @@
 
     <!-- 主内容区 -->
     <div class="game-main">
+      <section v-if="store.gameState.phase === 'placement'" class="placement-panel">
+        <h2>轮流放置数字</h2>
+        <p v-if="store.gameState.current_player === store.player_id">轮到你：选择一个数字，再选择空方格。</p>
+        <p v-else>等待 {{ store.getPlayerName(store.gameState.current_player) }} 放置数字。</p>
+        <div class="number-hand">
+          <button v-for="number in myPlacementHand" :key="number"
+            :class="{ selected: store.selectedPlacementNumber === number }"
+            :disabled="store.gameState.current_player !== store.player_id"
+            @click="store.selectedPlacementNumber = number">{{ number }}</button>
+        </div>
+      </section>
       <!-- 预览倒计时 -->
       <div v-if="store.gameState.isPreview" class="preview-timer">
         <div class="timer-content">
@@ -97,6 +113,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useMemorialBanquetStore } from '@/stores/memorialBanquetStore';
+import { useUserStore } from '@/stores/userStore';
 import { hasPendingConnection, restoreConnection, connectSPHSocket, isWebSocketActive, setRouteChanging } from '@/ws/samePatternSocket';
 import axios from 'axios';
 import GameHeader from '@/components/GameHeader.vue';
@@ -106,6 +123,7 @@ import GameOverModal from '../components/GameOverModal.vue';
 import RulesSettings from '@/components/RulesSettings.vue';
 
 const store = useMemorialBanquetStore();
+const userStore = useUserStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -134,13 +152,20 @@ const rankedPlayers = computed(() => {
   return Object.entries(store.gameState.gameInfo)
     .map(([id, info]) => ({
       id,
-      name: store.players[id]?.name || '未知',
+      name: store.getPlayerName(id),
       score: info.score,
       errorCount: info.errorCount || 0,
       isWinner: store.gameState.winner === id
     }))
     .sort((a, b) => b.score - a.score);
 });
+const myPlacementHand = computed(() =>
+  store.gameState?.placement?.hands?.[store.player_id] || []);
+const now = ref(Date.now());
+const remainingSeconds = computed(() => store.gameState?.decision?.deadline
+  ? Math.max(0, Math.ceil(store.gameState.decision.deadline - now.value / 1000)) : null);
+const isSystemManaged = computed(() =>
+  store.gameState?.managed_players?.includes(store.player_id));
 
 const getLetterImage = (cardId) => {
   const letter = cardId.charAt(0);
@@ -151,8 +176,8 @@ const getLetterImage = (cardId) => {
 };
 
 // 方法
-const leaveGame = () => {
-  store.send({ type: 'leave_room', roomId: store.room?.room_id });
+const leaveGame = async () => {
+  await store.leaveRoom();
   router.push({ name: 'MBLobby' });
 };
 
@@ -173,7 +198,8 @@ const playAgain = async () => {
   }
 };
 
-const handleExit = () => {
+const handleExit = async () => {
+  await store.leaveRoom();
   router.push({ name: 'MBLobby' });
 };
 
@@ -182,6 +208,7 @@ const closeFinalState = () => {
 };
 
 let previewTimer = null;
+let decisionClock = null;
 
 const updatePreviewTimer = () => {
   if (store.gameState?.isPreview && store.gameState?.previewRemaining > 0) {
@@ -202,6 +229,7 @@ const updatePreviewTimer = () => {
 // 检查并处理重连
 onMounted(async () => {
   const roomId = route.params.roomId;
+  decisionClock = setInterval(() => { now.value = Date.now(); }, 250);
 
   setTimeout(() => {
     setRouteChanging(false);
@@ -226,6 +254,29 @@ onMounted(async () => {
     console.log('🎯 收到终局状态事件:', data);
     showFinalState.value = true;
   };
+
+  isReconnecting.value = true;
+  reconnectStatus.value = '正在恢复登录身份与游戏状态…';
+  try {
+    await userStore.checkLoginStatus();
+    if (!userStore.isLoggedIn || !userStore.user) throw new Error('登录状态已失效');
+    store.syncUserData();
+    await axios.post(`${import.meta.env.VITE_URL}/api/rooms/o3MB/${roomId}/join`, {}, {
+      withCredentials: true
+    });
+    if (!isWebSocketActive()) await joinNewSession(roomId);
+    else store.send({ type: 'get_game_state' });
+    reconnectStatus.value = '游戏状态恢复成功';
+    setTimeout(() => {
+      isReconnecting.value = false;
+      reconnectStatus.value = '';
+    }, 500);
+  } catch (error) {
+    console.error('恢复游戏状态失败:', error);
+    reconnectStatus.value = error.response?.data?.detail || error.message || '恢复游戏状态失败';
+    setTimeout(() => router.replace({ name: 'MBLobby' }), 1200);
+  }
+  return;
 
   // 检查连接状态
   if (isWebSocketActive()) {
@@ -327,7 +378,7 @@ const joinNewSession = async (roomId) => {
     // 清除旧的连接信息
     localStorage.removeItem('o3MB_LAST_CONNECTION');
 
-    connectSPHSocket(store.handleMessage, roomId, player_info);
+    connectSPHSocket(store.handleMessage, roomId, player_info, 'o3MB');
 
     setTimeout(() => {
       isReconnecting.value = false;
@@ -343,6 +394,7 @@ const joinNewSession = async (roomId) => {
 onUnmounted(() => {
   console.log("GamePage的onUnmounted激活，断开websocket连接")
   store.disconnect();
+  if (decisionClock) clearInterval(decisionClock);
   if (previewTimer) {
     clearInterval(previewTimer);
     previewTimer = null;
@@ -350,6 +402,8 @@ onUnmounted(() => {
 });
 </script>
 <style scoped>
+.action-countdown{position:fixed;right:18px;top:16px;z-index:1200;padding:8px 13px;border-radius:18px;background:#1d5c42;color:#fff;font-weight:800}.managed-overlay{position:fixed;inset:0;z-index:2500;background:#000c;display:grid;place-items:center}.managed-overlay section{padding:28px;border-radius:16px;background:#fff;text-align:center}.managed-overlay button{padding:10px 18px;border:0;border-radius:8px;background:#246b4d;color:#fff}
+.placement-panel{margin:0 auto 14px;max-width:700px;padding:14px;text-align:center;background:#fff;border-radius:12px;box-shadow:0 2px 8px #0002}.placement-panel h2{margin:0 0 6px}.number-hand{display:flex;justify-content:center;flex-wrap:wrap;gap:8px}.number-hand button{min-width:42px;padding:9px;border:2px solid #72a987;border-radius:8px;background:#f4fff7;font-weight:800}.number-hand button.selected{background:#226b4b;color:#fff;border-color:#174b35}
 .game-bg {
   background: #e6ffe6;
   height: 100vh;

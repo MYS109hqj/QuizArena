@@ -4,6 +4,7 @@
     flipped: flipped || isPreview,
     matched: matched,
     unmatched: unmatched,
+    placed: isPlaced,
     'can-upgrade': pendingUpgrade && (card.cardId === pendingUpgrade.card1Id || card.cardId === pendingUpgrade.card2Id)
   }" @click="handleClick">
     <div class="card-inner">
@@ -39,11 +40,20 @@ const props = defineProps({
 
 const store = useMemorialBanquetStore();
 
-const isMyTurn = computed(() => store.gameState?.current_player === store.player_id);
+const isMyTurn = computed(() => String(store.gameState?.current_player) === String(store.player_id));
 const isPreview = computed(() => store.gameState?.isPreview || false);
 const pendingUpgrade = computed(() => store.pendingUpgrade);
+const isPlaced = computed(() => store.placedCards.includes(props.card.cardId));
 
 const handleClick = () => {
+  if (store.gameState?.phase === 'placement') {
+    if (!isMyTurn.value || isPlaced.value || store.selectedPlacementNumber == null) return;
+    store.send({
+      type: 'action',
+      action: { type: 'place_number', cardId: props.card.cardId, number: store.selectedPlacementNumber }
+    });
+    return;
+  }
   if (!isMyTurn.value || props.flipped) return;
 
   const rules = store.gameRules;
@@ -131,6 +141,7 @@ const getLetterImage = (index) => {
   border: 2px solid #ef4444;
   box-sizing: border-box;
 }
+.card.placed:not(.flipped){opacity:.82}.card.placed:not(.flipped) .card-inner{box-shadow:inset 0 0 0 3px #245a43}
 
 .card.can-upgrade .card-inner {
   border: 3px solid #f59e0b;

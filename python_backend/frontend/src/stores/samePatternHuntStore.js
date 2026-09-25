@@ -9,7 +9,7 @@ function getUserData() {
   const userStore = useUserStore();
   if (userStore.isLoggedIn && userStore.user) {
     return {
-      player_id: userStore.user.id || `user-${Date.now()}`,
+      player_id: String(userStore.user.id),
       player_name: userStore.user.username || '用户',
       avatarUrl: userStore.user.avatar || "https://images.unsplash.com/photo-1560169573-5ff6f7f35fe4?w=300&h=300&fit=crop&q=85&auto=format"
     };
@@ -17,7 +17,7 @@ function getUserData() {
 
   // 如果用户未登录，返回默认数据
   return {
-    player_id: `guest-${Date.now()}`,
+    player_id: '',
     player_name: '游客',
     avatarUrl: "https://images.unsplash.com/photo-1560169573-5ff6f7f35fe4?w=300&h=300&fit=crop&q=85&auto=format"
   };
@@ -60,7 +60,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
       mockEnabled: import.meta.env.VITE_USE_MOCK === 'true',
 
       // 临时默认值，将在初始化后通过syncUserData更新
-      player_id: `temp-${Date.now()}`,
+      player_id: '',
       player_name: '加载中...',
       avatarUrl: "https://images.unsplash.com/photo-1560169573-5ff6f7f35fe4?w=300&h=300&fit=crop&q=85&auto=format",
 
@@ -68,6 +68,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
       room_id: null,
       room: {},
       players: {},
+      playerDirectory: {},
 
       // 房间缓存，用于预加载优化
       roomCache: {},
@@ -177,7 +178,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
     syncUserData() {
       const userStore = useUserStore();
       if (userStore.isLoggedIn && userStore.user) {
-        this.player_id = userStore.user.id || this.player_id;
+        this.player_id = String(userStore.user.id);
         this.player_name = userStore.user.username || this.player_name;
         this.avatarUrl = userStore.user.avatar || this.avatarUrl;
       }
@@ -234,6 +235,7 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
         }
       } else {
         try {
+          await axios.post(`${import.meta.env.VITE_URL}/api/rooms/o2SPH/${roomId}/join`, {});
           // 获取玩家信息
           const player_info = {
             type: 'player_info',
@@ -363,7 +365,14 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
               "min_players": data.min_players
             }
           };
-          this.players = data.players || [];
+          const incomingPlayers = data.players || {};
+          this.playerDirectory = {
+            ...this.playerDirectory,
+            ...(Array.isArray(incomingPlayers)
+              ? Object.fromEntries(incomingPlayers.map(player => [String(player.id), player]))
+              : incomingPlayers)
+          };
+          this.players = incomingPlayers;
           this.gameStatus = data.status || 'waiting';
           if (data.room_id) {
             this.room_id = data.room_id;
@@ -513,9 +522,37 @@ export const useSamePatternHuntStore = defineStore('samePatternHunt', {
       }
     },
 
+    async leaveRoom() {
+      const roomId = this.room_id;
+      if (roomId) {
+        try {
+          await axios.delete(`${import.meta.env.VITE_URL}/api/rooms/o2SPH/${roomId}/membership`, {
+            withCredentials: true
+          });
+        } catch (error) {
+          console.error('退出房间失败:', error);
+        }
+      }
+      this.disconnect();
+    },
+
+    getPlayerName(playerId) {
+      const key = String(playerId);
+      const current = Array.isArray(this.players)
+        ? this.players.find(player => String(player.id) === key)
+        : this.players?.[key];
+      return current?.name || this.playerDirectory?.[key]?.name || '未知玩家';
+    },
+
     disconnect() {
+      const identity = {
+        player_id: this.player_id,
+        player_name: this.player_name,
+        avatarUrl: this.avatarUrl
+      };
       closeSPHSocket();
       this.$reset();
+      Object.assign(this, identity);
       this.syncUserData(); // 重新从userStore同步数据
     },
 

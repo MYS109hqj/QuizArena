@@ -17,6 +17,8 @@
               id="login-username"
               v-model="loginData.username"
               type="text"
+              name="username"
+              autocomplete="username"
               required
               placeholder="请输入用户名"
             />
@@ -28,6 +30,8 @@
               id="login-password"
               v-model="loginData.password"
               type="password"
+              name="password"
+              autocomplete="current-password"
               required
               placeholder="请输入密码"
             />
@@ -53,6 +57,8 @@
               id="register-username"
               v-model="registerData.username"
               type="text"
+              name="username"
+              autocomplete="username"
               required
               placeholder="3-50个字符"
               minlength="3"
@@ -66,6 +72,8 @@
               id="register-email"
               v-model="registerData.email"
               type="email"
+              name="email"
+              autocomplete="email"
               required
               placeholder="请输入有效邮箱"
             />
@@ -77,6 +85,8 @@
               id="register-password"
               v-model="registerData.password"
               type="password"
+              name="new-password"
+              autocomplete="new-password"
               required
               placeholder="至少6个字符"
               minlength="6"

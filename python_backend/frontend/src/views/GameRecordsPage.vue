@@ -145,8 +145,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 
-// 从环境变量获取API基础URL，默认使用localhost
-const API_BASE_URL = import.meta.env.VITE_URL || 'http://localhost:8000';
+// 从环境变量获取API基础URL；生产环境未设置时走 nginx 相对路径
+const API_BASE_URL = import.meta.env.VITE_URL || '';
 
 const userStore = useUserStore()
 const router = useRouter()

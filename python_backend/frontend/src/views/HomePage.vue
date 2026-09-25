@@ -26,11 +26,18 @@
       <div class="games-section">
         <h2>选择游戏</h2>
         <div class="games-grid">
-          <div class="game-card" @click="navigateToGame('quiz')">
+          <div class="game-card" @click="navigateToGame('newQuizGame')">
+            <div class="game-icon">⚡</div>
+            <h3>New Quiz Game</h3>
+            <p>题库驱动的多人实时抢答</p>
+            <button class="play-btn">开始抢答</button>
+          </div>
+          <div class="game-card disabled">
             <div class="game-icon">❓</div>
             <h3>知识问答</h3>
             <p>多人实时知识竞赛</p>
-            <button class="play-btn">开始游戏</button>
+            <button class="play-btn" disabled>开始游戏</button>
+            <div class="maintenance-overlay">暂时维护中</div>
           </div>
 
           <div class="game-card" @click="navigateToGame('samePatternHunt')">
@@ -51,6 +58,33 @@
             <div class="game-icon">🎴</div>
             <h3>记忆盛宴</h3>
             <p>匹配卡牌数字，升级提升分数</p>
+            <button class="play-btn">开始游戏</button>
+          </div>
+
+          <div class="game-card" @click="navigateToGame('mazeRace')">
+            <div class="game-icon">⚔️</div>
+            <h3>记忆迷宫对战</h3>
+            <p>墙体全程隐藏，两人抢先抵达对角</p>
+            <button class="play-btn">联机对战</button>
+          </div>
+
+          <div class="game-card" @click="navigateToGame('flip7')">
+            <div class="game-icon">🃏</div>
+            <h3>Flip7</h3>
+            <p>翻牌冲刺，谨慎决定拿牌或停手</p>
+            <button class="play-btn">开始游戏</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 小游戏入口区域（Nginx 独立路径） -->
+      <div class="games-section">
+        <h2>更多小游戏</h2>
+        <div class="games-grid">
+          <div class="game-card" v-for="mini in miniGames" :key="mini.path" @click="openMiniGame(mini.path)">
+            <div class="game-icon">{{ mini.icon }}</div>
+            <h3>{{ mini.name }}</h3>
+            <p>{{ mini.desc }}</p>
             <button class="play-btn">开始游戏</button>
           </div>
         </div>
@@ -81,16 +115,31 @@ export default {
     const userStore = useUserStore()
     const router = useRouter()
 
+    const miniGames = [
+      { path: '/Filp7Recorder', icon: '📝', name: 'Flip7 计分器', desc: '记录 Flip7 对局得分' },
+      { path: '/HiddenMaze', icon: '🌀', name: '隐藏迷宫', desc: '独立版迷宫小游戏' },
+      { path: '/Yro', icon: '🎮', name: 'YRO', desc: '独立网页小游戏' }
+    ]
+
     const navigateToGame = (gameType) => {
-      if (gameType === 'quiz') {
-        router.push('/quiz/enter')
+      if (gameType === 'flip7') {
+        router.push('/flip7')
+      } else if (gameType === 'newQuizGame') {
+        router.push('/newQuizGame')
       } else if (gameType === 'samePatternHunt') {
         router.push('/samePatternHunt')
       } else if (gameType === 'hiddenWallMaze') {
         router.push('/hiddenWallMaze')
       } else if (gameType === 'memorialBanquet') {
         router.push('/memorialBanquet')
+      } else if (gameType === 'mazeRace') {
+        router.push('/mazeRace')
       }
+    }
+
+    // 小游戏挂在 Nginx 根路径下（主站位于 /game/），需整页跳转
+    const openMiniGame = (path) => {
+      window.open(path, '_blank')
     }
 
     const navigateToLogin = () => {
@@ -107,7 +156,9 @@ export default {
 
     return {
       userStore,
+      miniGames,
       navigateToGame,
+      openMiniGame,
       navigateToLogin,
       navigateToSettings,
       navigateToRecords
@@ -303,6 +354,41 @@ export default {
 .game-card:hover {
   transform: translateY(-5px);
   box-shadow: 0 6px 16px rgba(58, 157, 106, 0.25);
+}
+
+/* 暂停维护的游戏卡片 */
+.game-card.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  position: relative;
+}
+
+.game-card.disabled:hover {
+  transform: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+.game-card.disabled .play-btn {
+  cursor: not-allowed;
+}
+
+.maintenance-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(44, 62, 80, 0.72);
+  border-radius: 16px;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  font-weight: bold;
+  color: #fff;
+  letter-spacing: 2px;
+  pointer-events: none;
+}
+
+.game-card.disabled:hover .maintenance-overlay {
+  display: flex;
 }
 
 .game-icon {

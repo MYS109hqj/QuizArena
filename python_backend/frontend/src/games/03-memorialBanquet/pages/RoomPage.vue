@@ -75,6 +75,10 @@
             <option value="extreme">极难（24张卡牌）</option>
           </select>
         </div>
+        <div class="setting-item">
+          <label>手动放置数字：</label>
+          <input type="checkbox" v-model="settingsForm.manualPlacement">
+        </div>
         <div class="dialog-buttons">
           <button @click="saveSettings" class="green-btn">保存</button>
           <button @click="showSettingsDialog = false" class="cancel-btn">取消</button>
@@ -133,7 +137,8 @@ const showRules = ref(false); // 控制规则模态框显示
 const settingsForm = ref({
   minPlayers: store.room?.config?.min_players || 2,
   maxPlayers: store.room?.config?.max_players || 2,
-  difficulty: store.room?.config?.difficulty || 'normal'
+  difficulty: store.room?.config?.difficulty || 'normal',
+  manualPlacement: store.room?.rules?.manual_placement || false
 });
 
 // 监听房间状态变化
@@ -191,6 +196,7 @@ watch(
         settingsForm.value.minPlayers = newMinPlayers;
         settingsForm.value.maxPlayers = newMaxPlayers;
         settingsForm.value.difficulty = newDifficulty;
+        settingsForm.value.manualPlacement = newRoom.rules?.manual_placement || false;
         console.log(`🔄 设置表单已同步: min=${newMinPlayers}, max=${newMaxPlayers}, difficulty=${newDifficulty}`);
 
         // 如果设置发生了变化且设置对话框是打开的，自动关闭对话框
@@ -335,7 +341,8 @@ function saveSettings() {
     settings: {
       min_players: settingsForm.value.minPlayers,
       max_players: settingsForm.value.maxPlayers,
-      difficulty: settingsForm.value.difficulty
+      difficulty: settingsForm.value.difficulty,
+      rules: { manual_placement: settingsForm.value.manualPlacement }
     }
   });
 

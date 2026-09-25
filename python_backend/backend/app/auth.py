@@ -24,10 +24,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """验证密码"""
     # 直接使用bcrypt验证密码
+    if not isinstance(plain_password, str) or not isinstance(hashed_password, str):
+        return False
     password_bytes = plain_password.encode('utf-8')
     if len(password_bytes) > 72:
         password_bytes = password_bytes[:72]
-    return bcrypt.checkpw(password_bytes, hashed_password.encode('utf-8'))
+    try:
+        return bcrypt.checkpw(password_bytes, hashed_password.encode('utf-8'))
+    except (TypeError, ValueError):
+        return False
 
 def get_password_hash(password: str) -> str:
     """生成密码哈希"""

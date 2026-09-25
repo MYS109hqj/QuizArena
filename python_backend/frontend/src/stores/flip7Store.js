@@ -21,31 +21,45 @@ function userData() {
     player_id: String(users.user.id), player_name: users.user.username || '玩家',
     avatarUrl: users.user.avatar || ''
   };
-  let id = localStorage.getItem('flip7_guest_id');
-  if (!id) { id = `guest-${crypto.randomUUID()}`; localStorage.setItem('flip7_guest_id', id); }
-  return { player_id: id, player_name: '游客', avatarUrl: '' };
+  return null;
 }
 
 export const useFlip7Store = defineStore('flip7', {
   state: () => ({
-    rooms: [], creatingRoom: false, connected: false,
+    rooms: [], creatingRoom: false, connected: false, initializing: false,
     player_id: '', player_name: '', avatarUrl: '', room_id: null,
+    playerDirectory: {},
     room: {}, players: {}, gameStatus: 'waiting', gameState: defaultGameState(),
     roundHistory: [], lastCard: null, notice: null,
   }),
   actions: {
-    initStore() { Object.assign(this, userData()); },
+    async initStore() {
+      const users = useUserStore();
+      if (!users.isLoggedIn || !users.user) await users.checkLoginStatus();
+      const identity = userData();
+      if (!identity) throw new Error('请先登录后再游玩');
+      Object.assign(this, identity);
+      return true;
+    },
     async createRoom() {
       this.creatingRoom = true;
       try {
-        this.initStore();
-        const { data } = await axios.get(`${import.meta.env.VITE_URL}/api/new-room-id-short/o4Flip7`);
-        this.enterRoom(data.room_id);
+        await this.initStore();
+        const { data } = await axios.post(`${import.meta.env.VITE_URL}/api/rooms/o4Flip7`, {}, { withCredentials: true });
+        await this.enterRoom(data.room_id);
         return data.room_id;
       } finally { this.creatingRoom = false; }
     },
-    enterRoom(roomId) {
-      this.initStore(); this.room_id = roomId;
+    async enterRoom(roomId) {
+      this.initializing = true;
+      try {
+        await this.initStore();
+        await axios.post(`${import.meta.env.VITE_URL}/api/rooms/o4Flip7/${roomId}/join`, {}, { withCredentials: true });
+      } catch (error) {
+        this.showNotice(error.response?.data?.detail || error.message || '无法加入房间', 'error');
+        throw error;
+      } finally { this.initializing = false; }
+      this.room_id = roomId;
       connectFlip7Socket(data => this.handleMessage(data), roomId, {
         player_id: this.player_id, player_name: this.player_name, avatarUrl: this.avatarUrl
       });
@@ -54,25 +68,34 @@ export const useFlip7Store = defineStore('flip7', {
       const { data } = await axios.get(`${import.meta.env.VITE_URL}/api/room-list/o4Flip7`);
       this.rooms = data.rooms || [];
     },
-    leaveRoom() {
+    async leaveRoom(notifyServer = true) {
+      const roomId = this.room_id;
+      if (notifyServer && roomId) {
+        try { await axios.delete(`${import.meta.env.VITE_URL}/api/rooms/o4Flip7/${roomId}/membership`, { withCredentials: true }); }
+        catch (error) { console.error('退出房间失败', error); }
+      }
       closeFlip7Socket(); this.room_id = null; this.room = {}; this.players = {};
       this.gameStatus = 'waiting'; this.gameState = defaultGameState();
       this.roundHistory = []; this.lastCard = null;
     },
     startGame() { sendFlip7Message({ type: 'start_game' }); },
     toggleReady() { sendFlip7Message({ type: 'toggle_ready' }); },
-    drawCard() { sendFlip7Message({ type: 'action', action: 'draw' }); },
-    stopTurn() { sendFlip7Message({ type: 'action', action: 'stop' }); },
+    drawCard() { sendFlip7Message({ type: 'action', action: 'draw', decision_id: this.gameState.decision?.id }); },
+    stopTurn() { sendFlip7Message({ type: 'action', action: 'stop', decision_id: this.gameState.decision?.id }); },
     savePlayerStrategy(strategy) {
       sendFlip7Message({ type: 'save_player_strategy', strategy });
     },
     setStrategyAutoplay(enabled) {
       sendFlip7Message({ type: 'set_strategy_autoplay', enabled });
     },
+    cancelSystemManaged() { sendFlip7Message({ type: 'cancel_system_managed' }); },
     addBot(config) { sendFlip7Message({ type: 'add_bot', config }); },
     removeBot(botId) { sendFlip7Message({ type: 'remove_bot', bot_id: botId }); },
+    async kickMember(playerId) {
+      await axios.delete(`${import.meta.env.VITE_URL}/api/rooms/o4Flip7/${this.room_id}/members/${playerId}`, { withCredentials: true });
+    },
     selectTarget(targetId, cardId = null, ownCardId = null, secondTargetId = null, secondCardId = null) {
-      sendFlip7Message({ type: 'action', action: 'select_target', data: {
+      sendFlip7Message({ type: 'action', action: 'select_target', decision_id: this.gameState.decision?.id, data: {
         target_id: targetId, card_id: cardId, own_card_id: ownCardId,
         second_target_id: secondTargetId, second_card_id: secondCardId } });
     },
@@ -85,16 +108,21 @@ export const useFlip7Store = defineStore('flip7', {
     handleMessage(data) {
       if (data.type === 'room_state') {
         this.room = data;
+        this.playerDirectory = { ...this.playerDirectory, ...(data.players || {}) };
         this.players = data.players || {};
         if (data.rules) this.gameState.rules = data.rules;
         if (data.error) this.showNotice(data.error, 'error');
         this.gameStatus = data.status === 'playing' ? 'playing' : 'waiting';
       } else if (data.type === 'player_list') {
         this.players = Object.fromEntries((data.players || []).map(p => [p.id, p]));
+        this.playerDirectory = { ...this.playerDirectory, ...this.players };
       } else if (data.type === 'game_state') {
         const oldRound = this.gameState.round;
         this.gameState = { ...defaultGameState(), ...data };
-        if (data.players) this.players = data.players;
+        if (data.players) {
+          this.players = data.players;
+          this.playerDirectory = { ...this.playerDirectory, ...data.players };
+        }
         this.gameStatus = data.state === 'finished' ? 'finished' : 'playing';
         if (data.round > oldRound) this.roundHistory = [];
       } else if (data.type === 'card_drawn') {
@@ -114,6 +142,9 @@ export const useFlip7Store = defineStore('flip7', {
         if (data.rules) this.gameState.rules = data.rules;
       } else if (data.type === 'game_finished') {
         this.gameState.state = 'finished'; this.gameStatus = 'finished';
+      } else if (data.type === 'removed_from_room') {
+        this.showNotice(data.reason === 'kicked' ? '你已被房主移出房间' : '已退出房间', 'error');
+        this.leaveRoom(false);
       } else if (data.type === 'error' || data.type === 'rules_error') {
         this.showNotice(data.message || data.msg || '操作失败', 'error');
       }
@@ -124,7 +155,7 @@ export const useFlip7Store = defineStore('flip7', {
       setTimeout(() => { if (this.notice?.token === token) this.notice = null; }, 3500);
     },
     getPlayerName(id) {
-      const player = this.players[id];
+      const player = this.players[id] || this.playerDirectory[id];
       if (!player) return id;
       if (!player.is_bot) return player.name;
       const threshold = Number(player.strategy_threshold);

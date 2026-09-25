@@ -16,6 +16,13 @@ from .observers import SPHGameObserver
 class o2SPHGame(RoundBaseGame):
     def __init__(self, room_id: str):
         super().__init__(room_id)
+        self.action_timeout_seconds = 90
+        self.default_timeout_action = "wrong_pattern"
+        self.timeout_counts: Dict[str, int] = {}
+        self.managed_players = set()
+        self.decision_task = None
+        self.decision = None
+        self.decision_sequence = 0
         self.scores: Dict[str, int] = {}  # playerId -> score 可以移到RoundBaseGame？
         self.locked: bool = False
         self.config: Dict[str, Any] = {
@@ -38,16 +45,35 @@ class o2SPHGame(RoundBaseGame):
             },
             "animationDuration": 5000,
             "maxConcurrentFlips": 1,
-            "turnTransitionDelay": 1000
+            "turnTransitionDelay": 1000,
+            "timeoutDefaultAction": "wrong_pattern"
         }
         
         # 全局翻转状态跟踪
         self.global_flipping_cards: Dict[str, List[str]] = {}  # playerId -> [cardIds]
         self.flip_start_times: Dict[str, float] = {}  # cardId -> start time
 
+    async def connect(self, websocket, player):
+        # A refresh can open the new socket before the old socket's disconnect
+        # reaches the server. In that race disconnected_players is not yet set,
+        # so BaseGame would classify this as a new connection and omit game sync.
+        sync_after_connect = (
+            player.id not in self.disconnected_players
+            and player.id in self.player_targets
+        )
+        await super().connect(websocket, player)
+        if sync_after_connect:
+            await self.on_player_reconnect(player.id)
+
     async def handle_event(self, websocket, event, player_id):
         if event is None:
             await self.broadcast_to_player(player_id, {"type": "error", "msg": "无效事件"})
+            return
+
+        if event.get("type") == "cancel_system_managed":
+            self.managed_players.discard(player_id)
+            self._complete_decision(player_id, reset_timeout_count=True)
+            await self.broadcast_game_state()
             return
         
         # 处理规则更新请求
@@ -176,6 +202,8 @@ class o2SPHGame(RoundBaseGame):
                             })
                             return
 
+        # A valid in-time action breaks the consecutive-timeout streak.
+        self._complete_decision(player_id, reset_timeout_count=True)
         self.locked = True
         # 记录翻牌开始时间
         self.flip_start_times[card_id] = time.time()
@@ -239,24 +267,91 @@ class o2SPHGame(RoundBaseGame):
         self.locked = False
 
     async def broadcast_game_state(self):
+        self._arm_decision_timer()
         # 构造每位玩家的得分和下一目标信息
         game_info = {}
         for pid in self.player_order:
             idx = self.player_target_index.get(pid, 0)
             seq = self.player_targets.get(pid, [])
             next_pattern = seq[idx] if idx < len(seq) else None
+            target_window = [
+                {"index": position, "offset": position - idx,
+                 "pattern_id": seq[position]}
+                for position in range(max(0, idx - 3), min(len(seq), idx + 7))
+            ]
             game_info[pid] = {
                 "score": self.scores.get(pid, 0),
                 "next_pattern": next_pattern,
-                "target_index": idx
+                "target_index": idx,
+                "target_window": target_window
             }
         await self.broadcast({
             "type": "game_state",
             "state": self.state,
             "current_player": self.current_player,
             "round": self.round,
-            "gameInfo": game_info
+            "gameInfo": game_info,
+            "decision": self.decision,
+            "timeout_counts": self.timeout_counts,
+            "managed_players": list(self.managed_players)
         })
+
+    def _complete_decision(self, player_id=None, reset_timeout_count=False):
+        if self.decision_task and self.decision_task is not asyncio.current_task():
+            self.decision_task.cancel()
+        self.decision_task = None
+        self.decision = None
+        if reset_timeout_count and player_id is not None:
+            self.timeout_counts[player_id] = 0
+
+    def _arm_decision_timer(self):
+        if self.state == "finished" or not self.current_player:
+            self._complete_decision()
+            return
+        signature = [self.current_player, self.round]
+        if self.decision and self.decision.get("signature") == signature:
+            return
+        self._complete_decision()
+        self.decision_sequence += 1
+        timeout = 0.15 if self.current_player in self.managed_players else self.action_timeout_seconds
+        self.decision = {
+            "id": self.decision_sequence,
+            "player_id": self.current_player,
+            "kind": "primary",
+            "timeout_seconds": timeout,
+            "deadline": time.time() + timeout,
+            "signature": signature,
+        }
+        self.decision_task = asyncio.create_task(
+            self._decision_timeout(self.decision_sequence, self.current_player, timeout)
+        )
+
+    async def _decision_timeout(self, decision_id, player_id, timeout):
+        try:
+            await asyncio.sleep(timeout)
+            if not self.decision or self.decision.get("id") != decision_id:
+                return
+            self.decision_task = None
+            self.decision = None
+            self.timeout_counts[player_id] = self.timeout_counts.get(player_id, 0) + 1
+            if self.timeout_counts[player_id] >= 2:
+                self.managed_players.add(player_id)
+            await self.broadcast({
+                "type": "player_timed_out",
+                "player_id": player_id,
+                "timeout_count": self.timeout_counts[player_id],
+                "managed": player_id in self.managed_players,
+                "default_action": self.game_rules.get("timeoutDefaultAction", self.default_timeout_action),
+            })
+            # Timeout is scored exactly like revealing a wrong pattern, but no
+            # concrete card is revealed and therefore no card animation is sent.
+            self.scores[player_id] = self.scores.get(player_id, 0) - 1
+            self.round += 1
+            self.current_player = self.next_player()
+            await self.broadcast_game_state()
+            await self.check_end_condition()
+        except asyncio.CancelledError:
+            return
 
     def is_game_finished(self) -> bool:
         # 积分为0或>=20或目标序列完成则结束
@@ -597,6 +692,12 @@ class o2SPHGame(RoundBaseGame):
 
     async def on_player_reconnect(self, player_id: str):
         """处理玩家重连，发送完整状态同步"""
+        # Waiting-room reconnects happen before start_game creates per-player data.
+        if (player_id not in self.player_targets or
+                player_id not in self.player_target_index or
+                player_id not in self.scores):
+            await self.broadcast_game_state()
+            return
         # 发送完整的游戏状态
         await self.broadcast_game_state()
         

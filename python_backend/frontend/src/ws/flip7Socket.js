@@ -9,8 +9,15 @@ let attempts = 0;
 export const isConnected = ref(false);
 export const connectionError = ref(null);
 
+function getWsBaseUrl() {
+  const envUrl = import.meta.env.VITE_WEBSOCKET_URL;
+  if (envUrl) return envUrl;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+}
+
 function websocketUrl(roomId, gameType) {
-  const base = import.meta.env.VITE_WEBSOCKET_URL || 'ws://localhost:8000/ws';
+  const base = getWsBaseUrl();
   return `${base}/${roomId}/${gameType}`;
 }
 
@@ -26,8 +33,6 @@ export function connectFlip7Socket(onMessage, roomId, playerInfo, gameType = 'o4
     attempts = 0;
     isConnected.value = true;
     connectionError.value = null;
-    ws.send(JSON.stringify({ id: playerInfo.player_id, name: playerInfo.player_name,
-      avatar: playerInfo.avatarUrl }));
   };
   ws.onmessage = event => {
     if (socket !== ws) return;
@@ -77,4 +82,4 @@ export function restoreConnection(onMessage) {
 }
 
 export function hasPendingConnection() { return Boolean(connectionArgs); }
-export function setRouteChanging() {}
+export function setRouteChanging() { }

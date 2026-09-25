@@ -171,6 +171,7 @@ export const useTemplateStore = defineStore('template', {
         this.syncUserData();
         const playerData = getUserData();
         const gameType = 'o999Template';
+        await axios.post(`${import.meta.env.VITE_URL}/api/rooms/${gameType}/${roomId}/join`, {});
 
         connectTemplateSocket((data) => {
           this.handleMessage(data);
