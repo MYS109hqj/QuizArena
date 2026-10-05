@@ -16,7 +16,7 @@ from app.models.question_bank import QuestionBank, QuestionBankMember, QuestionB
 
 from .domain import (AnswerSubmission, RankedCorrectScoringStrategy, SystemClock,
                      TimeSyncRecord, ValidatedSynchronizedTimestampPolicy,
-                     question_from_snapshot)
+                     flow_for_question, question_from_snapshot)
 
 
 class NewQuizGame(BaseGame):
@@ -35,11 +35,14 @@ class NewQuizGame(BaseGame):
         self.questions = []
         self.current_question_index = -1
         self.current_question = None
+        self.current_flow = None
+        self.flow_runtime = None
         self.question_opened_at_ms = 0
         self.question_closes_at_ms = 0
         self.submissions: dict[str, AnswerSubmission] = {}
         self.attempt_counts: dict[str, int] = {}
         self.submission_sequence = 0
+        self.progress_event_sequence = 0
         self.scores: dict[str, int] = {}
         self.correct_counts: dict[str, int] = {}
         self.round_results: list[dict] = []
@@ -133,21 +136,35 @@ class NewQuizGame(BaseGame):
         if self.current_question_index >= len(self.questions):
             return await self._finish_game()
         self.current_question = self.questions[self.current_question_index]
+        self.current_flow = flow_for_question(self.current_question)
         self.submissions = {}; self.attempt_counts = {}; self.submission_sequence = 0
+        self.progress_event_sequence = 0
         self.question_opened_at_ms = self.clock.epoch_ms()
-        self.question_closes_at_ms = self.question_opened_at_ms + self.game_rules["time_limit_seconds"] * 1000
+        self.flow_runtime = self.current_flow.create_runtime(
+            self.current_question, self.scores.keys(), self.question_opened_at_ms,
+            self.game_rules["time_limit_seconds"])
+        self.question_closes_at_ms = self.flow_runtime.closes_at_ms
         self.phase = "answering"
         await self.broadcast_game_state()
-        self.timer_task = asyncio.create_task(self._round_timeout(self.current_question_index))
+        self.timer_task = asyncio.create_task(self._run_question_flow(self.current_question_index))
 
-    async def _round_timeout(self, question_index: int) -> None:
-        await asyncio.sleep(self.game_rules["time_limit_seconds"])
-        if self.phase == "answering" and self.current_question_index == question_index:
-            await self._close_question()
+    async def _run_question_flow(self, question_index: int) -> None:
+        """Wake for derived flow transitions; wall-clock time remains authoritative."""
+        while self.phase == "answering" and self.current_question_index == question_index:
+            now = self.clock.epoch_ms()
+            if now >= self.question_closes_at_ms:
+                await self._close_question()
+                return
+            next_update = self.current_flow.next_update_at_ms(self.flow_runtime, now)
+            wake_at = min(self.question_closes_at_ms,
+                          next_update if next_update is not None else self.question_closes_at_ms)
+            await asyncio.sleep(max(0.001, (wake_at - now) / 1000))
+            if self.phase == "answering" and self.current_question_index == question_index:
+                await self.broadcast_game_state()
 
     async def _submit_answer(self, player_id: str, event: dict) -> None:
         received = self.clock.epoch_ms()
-        if self.phase != "answering" or player_id in self.submissions or not self.current_question:
+        if self.phase != "answering" or not self.current_question or not self.current_flow:
             return
         if str(event.get("question_id")) != self.current_question.id:
             return await self.broadcast_to_player(player_id, {"type": "error", "message": "题目已变化，请刷新状态"})
@@ -155,13 +172,30 @@ class NewQuizGame(BaseGame):
             answer = self.current_question.parse_answer(event.get("answer"))
         except ValueError as exc:
             return await self.broadcast_to_player(player_id, {"type": "error", "message": str(exc)})
-        self.attempt_counts[player_id] = self.attempt_counts.get(player_id, 0) + 1
+        permission = self.current_flow.permission(self.flow_runtime, player_id, received)
+        if not permission.allowed:
+            return await self.broadcast_to_player(player_id, {"type": "answer_feedback",
+                "question_id": self.current_question.id, "correct": False,
+                "can_retry": not self.flow_runtime.player_states.get(player_id).finalized,
+                "attempt_count": self.attempt_counts.get(player_id, 0),
+                "current_stage": permission.current_stage,
+                "next_allowed_stage": permission.next_allowed_stage,
+                "message": permission.reason})
         grading = self.current_question.grade(answer)
-        if getattr(self.current_question, "allows_retry", False) and not grading.is_correct:
+        is_final = self.current_flow.apply_result(
+            self.flow_runtime, player_id, grading, received)
+        player_state = self.flow_runtime.player_states[player_id]
+        self.attempt_counts[player_id] = player_state.attempt_count
+        if not is_final:
+            await self.broadcast_game_state()
             return await self.broadcast_to_player(player_id, {"type": "answer_feedback",
                 "question_id": self.current_question.id, "correct": False,
                 "can_retry": True, "attempt_count": self.attempt_counts[player_id],
-                "message": "答案不对，可以继续尝试"})
+                "current_stage": permission.current_stage,
+                "next_allowed_stage": player_state.next_allowed_stage,
+                "message": (f"回答错误，第 {player_state.next_allowed_stage} 阶段可再次作答"
+                            if player_state.next_allowed_stage > permission.current_stage
+                            else "答案不对，可以继续尝试")})
         self.submission_sequence += 1
         sync = self.sync_records.get(player_id)
         if sync and sync.sync_id != event.get("sync_id"): sync = None
@@ -179,9 +213,13 @@ class NewQuizGame(BaseGame):
             "question_id": self.current_question.id, "correct": grading.is_correct,
             "attempt_count": self.attempt_counts[player_id],
             "timestamp_source": submission_time.source})
-        await self.broadcast({"type": "submission_progress", "submitted": len(self.submissions),
-                              "total": len(self.scores)})
-        if len(self.submissions) >= len(self.scores):
+        self.progress_event_sequence += 1
+        await self.broadcast({"type": "submission_progress",
+            "event_id": f"{self.current_question.id}:{self.progress_event_sequence}",
+            "question_id": self.current_question.id,
+            "submitted": len(self.submissions), "total": len(self.scores),
+            "message": "有玩家提交了答案"})
+        if all(state.finalized for state in self.flow_runtime.player_states.values()):
             await self._close_question()
 
     async def _close_question(self) -> None:
@@ -251,11 +289,26 @@ class NewQuizGame(BaseGame):
                 for pid, p in self.persistent_players.items() if pid in self.scores or self.state == "waiting"}
 
     async def broadcast_game_state(self) -> None:
+        now = self.clock.epoch_ms()
+        question_view = None
+        flow_view = {}
+        answer_permissions = {}
+        if self.current_question and self.current_flow and self.flow_runtime:
+            question_view = self.current_flow.public_question_view(
+                self.current_question, self.flow_runtime, now)
+            flow_view = self.current_flow.flow_view(self.flow_runtime, None, now)
+            answer_permissions = {
+                pid: self.current_flow.flow_view(self.flow_runtime, pid, now)["answer_permission"]
+                for pid in self.flow_runtime.player_states
+            }
         payload = {"type": "game_state", "state": self.state, "phase": self.phase,
             "bank_title": self.bank_title, "question_index": self.current_question_index,
-            "question_count": len(self.questions), "question": self.current_question.public_view() if self.current_question else None,
+            "question_count": len(self.questions), "question": question_view,
             "question_opened_at_ms": self.question_opened_at_ms,
             "question_closes_at_ms": self.question_closes_at_ms,
-            "submitted_player_ids": list(self.submissions), "scores": self.scores,
+            "flow": flow_view, "answer_permissions": answer_permissions,
+            "submitted_player_ids": list(self.submissions),
+            "submitted": len(self.submissions), "total": len(self.scores),
+            "scores": self.scores,
             "players": self._players_view(), "rules": self.game_rules}
         await self.broadcast(payload)

@@ -40,6 +40,7 @@ export const useNewQuizGameStore = defineStore('newQuizGame', {
     timeOffsetMs: 0,
     latestResult: null,
     answerFeedback: null,
+    submissionEvents: [],
     creatingRoom: false,
   }),
   actions: {
@@ -133,6 +134,7 @@ export const useNewQuizGameStore = defineStore('newQuizGame', {
       this.room = {};
       this.players = {};
       this.gameState = emptyGame();
+      this.submissionEvents = [];
       this.gameStatus = 'waiting';
     },
     handleMessage(data) {
@@ -174,12 +176,17 @@ export const useNewQuizGameStore = defineStore('newQuizGame', {
           ]),
         ];
       }
-      else if (data.type === 'submission_progress')
+      else if (data.type === 'submission_progress') {
         this.gameState = {
           ...this.gameState,
           submitted: data.submitted,
           total: data.total,
         };
+        if (!this.submissionEvents.some((event) => event.event_id === data.event_id)) {
+          this.submissionEvents.push({ ...data, received_at: Date.now() });
+          this.submissionEvents = this.submissionEvents.slice(-20);
+        }
+      }
       else if (data.type === 'error') this.notice = data.message || data.msg;
     },
   },

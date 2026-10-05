@@ -24,13 +24,18 @@ class BankInput(BaseModel):
 
 
 class QuestionInput(BaseModel):
-    question_type: Literal["single_choice", "text", "jianying"] = "single_choice"
+    question_type: Literal["single_choice", "text", "jianying", "multi_hint",
+                           "streaming_text"] = "single_choice"
     prompt: str = Field(min_length=1)
     options: list[str] = Field(default_factory=list, max_length=8)
     correct_option_index: int = 0
     accepted_answers: list[str] = Field(default_factory=list, max_length=20)
     explanation: str = ""
     default_score: int = Field(default=10, ge=0, le=10000)
+    hints: list[str] = Field(default_factory=list, max_length=6)
+    hint_interval_seconds: int = Field(default=20, ge=1, le=300)
+    character_interval_ms: int = Field(default=120, ge=20, le=5000)
+    answer_time_after_reveal_seconds: int = Field(default=10, ge=0, le=300)
 
 
 class MemberInput(BaseModel):
@@ -75,14 +80,16 @@ def question_item_view(item: QuestionItem) -> dict:
     answer = json.loads(item.correct_answer_json)
     result = {"id": item.id, "type": item.question_type, "prompt": item.prompt,
               "explanation": item.explanation, "default_score": item.default_score}
+    content = json.loads(item.content_json or "{}")
     if item.question_type == "single_choice":
         result.update(options=json.loads(item.options_json), correct_option_id=answer["option_id"])
     else:
         result["accepted_answers"] = answer["accepted_answers"]
+    result["content"] = content
     return result
 
 
-def question_payload(data: QuestionInput) -> tuple[str, str]:
+def question_payload(data: QuestionInput) -> tuple[str, str, str]:
     if data.question_type == "single_choice":
         if len(data.options) < 2 or any(not value.strip() for value in data.options):
             raise HTTPException(422, "单选题至少需要两个非空选项")
@@ -90,11 +97,22 @@ def question_payload(data: QuestionInput) -> tuple[str, str]:
             raise HTTPException(422, "正确选项索引无效")
         options = [{"id": chr(65 + index), "text": text.strip()} for index, text in enumerate(data.options)]
         answer = {"option_id": options[data.correct_option_index]["id"]}
-        return json.dumps(options, ensure_ascii=False), json.dumps(answer, ensure_ascii=False)
+        return (json.dumps(options, ensure_ascii=False),
+                json.dumps(answer, ensure_ascii=False), "{}")
     answers = [value.strip() for value in data.accepted_answers if value.strip()]
     if not answers:
         raise HTTPException(422, "问答题至少需要一个非空答案")
-    return "[]", json.dumps({"accepted_answers": answers}, ensure_ascii=False)
+    content = {}
+    if data.question_type == "multi_hint":
+        hints = [value.strip() for value in data.hints]
+        if len(hints) != 6 or any(not value for value in hints):
+            raise HTTPException(422, "多提示题必须填写六个提示")
+        content = {"hints": hints, "hint_interval_seconds": data.hint_interval_seconds}
+    elif data.question_type == "streaming_text":
+        content = {"character_interval_ms": data.character_interval_ms,
+                   "answer_time_after_reveal_seconds": data.answer_time_after_reveal_seconds}
+    return ("[]", json.dumps({"accepted_answers": answers}, ensure_ascii=False),
+            json.dumps(content, ensure_ascii=False))
 
 
 @router.get("/banks")
@@ -176,11 +194,12 @@ async def add_question(bank_id: int, data: QuestionInput, user: User = Depends(g
     db = SessionLocal()
     try:
         bank = require_bank(db, bank_id); require_editor(db, bank, user.id)
-        options_json, answer_json = question_payload(data)
+        options_json, answer_json, content_json = question_payload(data)
         position = db.query(QuestionItem).filter_by(bank_id=bank_id).count()
         item = QuestionItem(bank_id=bank_id, question_type=data.question_type,
             prompt=data.prompt, options_json=options_json, correct_answer_json=answer_json,
-            explanation=data.explanation, default_score=data.default_score, position=position)
+            content_json=content_json, explanation=data.explanation,
+            default_score=data.default_score, position=position)
         db.add(item); bank.status = "draft"; db.commit(); db.refresh(item)
         return {"id": item.id}
     finally:
@@ -208,11 +227,12 @@ async def update_question(bank_id: int, question_id: int, data: QuestionInput,
         bank = require_bank(db, bank_id); require_editor(db, bank, user.id)
         item = db.query(QuestionItem).filter_by(id=question_id, bank_id=bank_id).first()
         if not item: raise HTTPException(404, "题目不存在")
-        options_json, answer_json = question_payload(data)
+        options_json, answer_json, content_json = question_payload(data)
         item.question_type = data.question_type
         item.prompt = data.prompt
         item.options_json = options_json
         item.correct_answer_json = answer_json
+        item.content_json = content_json
         item.explanation = data.explanation
         item.default_score = data.default_score
         bank.status = "draft"; db.commit()

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import unicodedata
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 
@@ -167,6 +167,260 @@ class JianyingQuestion(TextQuestion):
         return {**super().public_view(), "hint_board": self.hint_board}
 
 
+class MultiHintQuestion(TextQuestion):
+    question_type = "multi_hint"
+    allows_retry = True
+
+    def __init__(self, data: dict[str, Any]):
+        content = dict(data.get("content") or {})
+        self.hints = tuple(str(value) for value in content.get("hints", []))
+        interval = content.get("hint_interval_seconds")
+        self.hint_interval_seconds = int(20 if interval is None else interval)
+        super().__init__(data)
+
+    def validate_definition(self) -> None:
+        super().validate_definition()
+        if len(self.hints) != 6 or any(not value.strip() for value in self.hints):
+            raise ValueError("多提示题必须包含六个非空提示")
+        if not 1 <= self.hint_interval_seconds <= 300:
+            raise ValueError("提示间隔必须在 1 到 300 秒之间")
+
+    def public_view(self) -> dict[str, Any]:
+        # Hints are exposed by MultiStageHintFlow only when their stage is reached.
+        return {"id": self.id, "type": self.question_type, "prompt": self.prompt,
+                "allows_retry": True}
+
+    def result_view(self) -> dict[str, Any]:
+        return {**super().result_view(), "hints": list(self.hints)}
+
+
+class StreamingTextQuestion(TextQuestion):
+    question_type = "streaming_text"
+
+    def __init__(self, data: dict[str, Any]):
+        content = dict(data.get("content") or {})
+        interval = content.get("character_interval_ms")
+        after_reveal = content.get("answer_time_after_reveal_seconds")
+        self.character_interval_ms = int(120 if interval is None else interval)
+        self.answer_time_after_reveal_seconds = int(
+            10 if after_reveal is None else after_reveal)
+        super().__init__(data)
+
+    def validate_definition(self) -> None:
+        super().validate_definition()
+        if not 20 <= self.character_interval_ms <= 5000:
+            raise ValueError("流文本字符间隔必须在 20 到 5000 毫秒之间")
+        if not 0 <= self.answer_time_after_reveal_seconds <= 300:
+            raise ValueError("流完后的答题时间必须在 0 到 300 秒之间")
+
+    def public_view(self) -> dict[str, Any]:
+        # The complete prompt must never be sent before it has been revealed.
+        return {"id": self.id, "type": self.question_type, "prompt": "",
+                "allows_retry": False}
+
+    def result_view(self) -> dict[str, Any]:
+        return {"id": self.id, "type": self.question_type, "prompt": self.prompt,
+                "allows_retry": False, "accepted_answers": list(self.accepted_answers),
+                "explanation": self.explanation}
+
+
+@dataclass
+class PlayerAttemptState:
+    next_allowed_stage: int = 1
+    finalized: bool = False
+    attempt_count: int = 0
+
+
+@dataclass(frozen=True)
+class SubmissionPermission:
+    allowed: bool
+    reason: str = ""
+    current_stage: int = 1
+    next_allowed_stage: int = 1
+
+
+@dataclass
+class FlowRuntime:
+    opened_at_ms: int
+    closes_at_ms: int
+    player_states: dict[str, PlayerAttemptState] = field(default_factory=dict)
+    metadata: dict[str, int] = field(default_factory=dict)
+
+
+class RetryEligibilityPolicy(ABC):
+    @abstractmethod
+    def next_allowed_stage(self, current_stage: int, attempt_count: int) -> int: ...
+
+
+class SkipNextStagePolicy(RetryEligibilityPolicy):
+    def next_allowed_stage(self, current_stage: int, attempt_count: int) -> int:
+        return current_stage + 2
+
+
+class QuestionFlowStrategy(ABC):
+    @abstractmethod
+    def create_runtime(self, question: Question, player_ids: Iterable[str],
+                       opened_at_ms: int, default_time_limit_seconds: int) -> FlowRuntime: ...
+
+    def current_stage(self, runtime: FlowRuntime, now_ms: int) -> int:
+        return 1
+
+    def permission(self, runtime: FlowRuntime, player_id: str,
+                   now_ms: int) -> SubmissionPermission:
+        state = runtime.player_states.get(player_id)
+        stage = self.current_stage(runtime, now_ms)
+        if state is None:
+            return SubmissionPermission(False, "玩家不在本轮中", stage, stage)
+        if now_ms >= runtime.closes_at_ms:
+            return SubmissionPermission(False, "本题答题时间已结束", stage,
+                                        state.next_allowed_stage)
+        if state.finalized:
+            return SubmissionPermission(False, "本题已经完成作答", stage,
+                                        state.next_allowed_stage)
+        if stage < state.next_allowed_stage:
+            return SubmissionPermission(False, f"第 {state.next_allowed_stage} 阶段可再次作答",
+                                        stage, state.next_allowed_stage)
+        return SubmissionPermission(True, current_stage=stage,
+                                    next_allowed_stage=state.next_allowed_stage)
+
+    @abstractmethod
+    def apply_result(self, runtime: FlowRuntime, player_id: str,
+                     grading: GradingResult, now_ms: int) -> bool:
+        """Update eligibility and return whether this attempt is the final submission."""
+
+    def public_question_view(self, question: Question, runtime: FlowRuntime,
+                             now_ms: int) -> dict[str, Any]:
+        return question.public_view()
+
+    def flow_view(self, runtime: FlowRuntime, player_id: str | None,
+                  now_ms: int) -> dict[str, Any]:
+        view = {"stage": self.current_stage(runtime, now_ms),
+                "closes_at_ms": runtime.closes_at_ms}
+        if player_id is not None:
+            permission = self.permission(runtime, player_id, now_ms)
+            view["answer_permission"] = {
+                "can_submit": permission.allowed,
+                "reason": permission.reason,
+                "next_allowed_stage": permission.next_allowed_stage,
+            }
+        return view
+
+    def next_update_at_ms(self, runtime: FlowRuntime, now_ms: int) -> int | None:
+        return None
+
+
+class FixedDeadlineFlow(QuestionFlowStrategy):
+    def create_runtime(self, question, player_ids, opened_at_ms,
+                       default_time_limit_seconds):
+        return FlowRuntime(opened_at_ms,
+            opened_at_ms + default_time_limit_seconds * 1000,
+            {str(pid): PlayerAttemptState() for pid in player_ids})
+
+    def apply_result(self, runtime, player_id, grading, now_ms):
+        state = runtime.player_states[player_id]
+        state.attempt_count += 1
+        retry = getattr(self, "allows_retry", False)
+        if grading.is_correct or not retry:
+            state.finalized = True
+            return True
+        return False
+
+
+class RetryUntilCorrectFlow(FixedDeadlineFlow):
+    allows_retry = True
+
+
+class MultiStageHintFlow(QuestionFlowStrategy):
+    def __init__(self, retry_policy: RetryEligibilityPolicy | None = None):
+        self.retry_policy = retry_policy or SkipNextStagePolicy()
+
+    def current_stage(self, runtime, now_ms):
+        interval_ms = runtime.metadata.get("hint_interval_ms")
+        if interval_ms is None:
+            # Stored on the runtime to keep all calculations independent of timers.
+            raise RuntimeError("多提示题运行时缺少提示间隔")
+        maximum = runtime.metadata["stage_count"]
+        return min(maximum, max(1, (max(0, now_ms - runtime.opened_at_ms)
+                                    // interval_ms) + 1))
+
+    def create_runtime(self, question, player_ids, opened_at_ms,
+                       default_time_limit_seconds):
+        interval_ms = question.hint_interval_seconds * 1000
+        runtime = FlowRuntime(opened_at_ms,
+            opened_at_ms + (len(question.hints) + 1) * interval_ms,
+            {str(pid): PlayerAttemptState() for pid in player_ids})
+        runtime.metadata.update(hint_interval_ms=interval_ms,
+                                stage_count=len(question.hints) + 1)
+        return runtime
+
+    def apply_result(self, runtime, player_id, grading, now_ms):
+        state = runtime.player_states[player_id]
+        state.attempt_count += 1
+        if grading.is_correct:
+            state.finalized = True
+            return True
+        stage = self.current_stage(runtime, now_ms)
+        state.next_allowed_stage = self.retry_policy.next_allowed_stage(
+            stage, state.attempt_count)
+        return False
+
+    def public_question_view(self, question, runtime, now_ms):
+        stage = self.current_stage(runtime, now_ms)
+        return {**question.public_view(),
+                "visible_hints": list(question.hints[:min(stage, len(question.hints))])}
+
+    def flow_view(self, runtime, player_id, now_ms):
+        return {**super().flow_view(runtime, player_id, now_ms),
+                "stage_count": runtime.metadata["stage_count"],
+                "stage_closes_at_ms": min(runtime.closes_at_ms,
+                    runtime.opened_at_ms + self.current_stage(runtime, now_ms)
+                    * runtime.metadata["hint_interval_ms"])}
+
+    def next_update_at_ms(self, runtime, now_ms):
+        stage = self.current_stage(runtime, now_ms)
+        if stage >= runtime.metadata["stage_count"]:
+            return runtime.closes_at_ms
+        return runtime.opened_at_ms + stage * runtime.metadata["hint_interval_ms"]
+
+
+class StreamingRevealFlow(FixedDeadlineFlow):
+    def create_runtime(self, question, player_ids, opened_at_ms,
+                       default_time_limit_seconds):
+        reveal_ms = len(question.prompt) * question.character_interval_ms
+        runtime = FlowRuntime(opened_at_ms,
+            opened_at_ms + reveal_ms + question.answer_time_after_reveal_seconds * 1000,
+            {str(pid): PlayerAttemptState() for pid in player_ids})
+        runtime.metadata.update(character_interval_ms=question.character_interval_ms,
+                                character_count=len(question.prompt))
+        return runtime
+
+    def revealed_count(self, runtime, now_ms):
+        elapsed = max(0, now_ms - runtime.opened_at_ms)
+        return min(runtime.metadata["character_count"],
+                   elapsed // runtime.metadata["character_interval_ms"])
+
+    def public_question_view(self, question, runtime, now_ms):
+        count = self.revealed_count(runtime, now_ms)
+        return {**question.public_view(), "prompt": question.prompt[:count],
+                "revealed_chars": count, "total_chars": len(question.prompt)}
+
+    def next_update_at_ms(self, runtime, now_ms):
+        count = self.revealed_count(runtime, now_ms)
+        if count >= runtime.metadata["character_count"]:
+            return runtime.closes_at_ms
+        return runtime.opened_at_ms + (count + 1) * runtime.metadata["character_interval_ms"]
+
+
+def flow_for_question(question: Question) -> QuestionFlowStrategy:
+    if isinstance(question, MultiHintQuestion):
+        return MultiStageHintFlow()
+    if isinstance(question, StreamingTextQuestion):
+        return StreamingRevealFlow()
+    if isinstance(question, JianyingQuestion):
+        return RetryUntilCorrectFlow()
+    return FixedDeadlineFlow()
+
+
 @dataclass(frozen=True)
 class TimeSyncRecord:
     sync_id: str
@@ -298,4 +552,8 @@ def question_from_snapshot(data: dict[str, Any]) -> Question:
         return TextQuestion(data)
     if question_type == "jianying":
         return JianyingQuestion(data)
+    if question_type == "multi_hint":
+        return MultiHintQuestion(data)
+    if question_type == "streaming_text":
+        return StreamingTextQuestion(data)
     raise ValueError(f"暂不支持题型: {question_type}")

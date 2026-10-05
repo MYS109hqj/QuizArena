@@ -1,7 +1,8 @@
 from app.games.new_quiz_game.domain import (
     AnswerSubmission, EffectiveTimestampRankingPolicy, RankedCorrectScoringStrategy,
     SingleChoiceQuestion, SubmissionTime, TextQuestion, JianyingQuestion, TimeSyncRecord,
-    ValidatedSynchronizedTimestampPolicy,
+    ValidatedSynchronizedTimestampPolicy, MultiHintQuestion, StreamingTextQuestion,
+    flow_for_question,
 )
 
 
@@ -60,3 +61,31 @@ def test_text_and_jianying_questions_normalize_answers_and_hide_them():
     assert jianying.allows_retry
     assert jianying.public_view()["hint_board"] == board
     assert "accepted_answers" not in jianying.public_view()
+
+
+def test_multi_hint_flow_derives_visibility_and_retry_stage_without_ban_list():
+    question = MultiHintQuestion({"id": "h", "prompt": "猜事物",
+        "accepted_answers": ["缓存"], "content": {
+            "hints": [f"提示{i}" for i in range(1, 7)], "hint_interval_seconds": 20}})
+    flow = flow_for_question(question)
+    runtime = flow.create_runtime(question, ["p1"], 1_000, 99)
+    assert runtime.closes_at_ms == 141_000
+    assert flow.public_question_view(question, runtime, 1_000)["visible_hints"] == ["提示1"]
+    wrong = question.grade(question.parse_answer("内存"))
+    assert not flow.apply_result(runtime, "p1", wrong, 1_000)
+    assert runtime.player_states["p1"].next_allowed_stage == 3
+    assert not flow.permission(runtime, "p1", 21_000).allowed
+    assert flow.permission(runtime, "p1", 41_000).allowed
+    assert len(flow.public_question_view(question, runtime, 101_000)["visible_hints"]) == 6
+
+
+def test_streaming_flow_only_exposes_elapsed_prompt_characters():
+    question = StreamingTextQuestion({"id": "s", "prompt": "中国北京",
+        "accepted_answers": ["北京"], "content": {
+            "character_interval_ms": 100, "answer_time_after_reveal_seconds": 2}})
+    flow = flow_for_question(question)
+    runtime = flow.create_runtime(question, ["p1"], 1_000, 99)
+    assert question.public_view()["prompt"] == ""
+    assert flow.public_question_view(question, runtime, 1_199)["prompt"] == "中"
+    assert flow.public_question_view(question, runtime, 1_400)["prompt"] == "中国北京"
+    assert runtime.closes_at_ms == 3_400

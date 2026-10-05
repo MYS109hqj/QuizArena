@@ -38,6 +38,7 @@ class QuestionItem(Base):
     prompt = Column(Text, nullable=False)
     options_json = Column(Text, nullable=False)
     correct_answer_json = Column(Text, nullable=False)
+    content_json = Column(Text, nullable=False, default="{}")
     explanation = Column(Text, nullable=False, default="")
     default_score = Column(Integer, nullable=False, default=10)
     position = Column(Integer, nullable=False, default=0)
